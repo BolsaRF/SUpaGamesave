@@ -13,6 +13,302 @@ import customtkinter as ctk
 from tkinter import filedialog
 import subprocess
 
+import tempfile
+import shutil
+import hashlib
+
+# Optional cloud dependencies (Google Drive). The app can run without them.
+try:
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    from googleapiclient.http import MediaIoBaseDownload
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+except Exception:
+    build = None
+
+
+# --- GOOGLE DRIVE BACKUP/RESTORE (OPTIONAL) ---
+
+GOOGLE_DRIVE_APP_FOLDER_NAME = "SaveFinderBackups"
+GOOGLE_DRIVE_ZIP_MIME = "application/zip"
+GOOGLE_DRIVE_MANIFEST_NAME = "manifest.json"
+
+# Update this if you have a different Google OAuth client config on your side.
+# This code expects an OAuth client secrets file named 'credentials.json' in the same directory as this script.
+GOOGLE_OAUTH_CLIENT_SECRETS_FILE = "credentials.json"
+GOOGLE_OAUTH_TOKEN_FILE = "token.json"
+
+# Scope allowing Drive file operations.
+GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+
+
+def _drive_enabled() -> bool:
+    return build is not None
+
+
+def _safe_makedirs(p: str):
+    os.makedirs(p, exist_ok=True)
+
+
+def _compute_file_hash(path: str, chunk_size: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _create_zip_with_manifest(zip_path: str, manifest: dict, folder_to_backup: str, log_callback=None):
+    """ZIP option B: zip contains manifest.json + contents/* (folder contents only)."""
+    import zipfile
+
+    if log_callback:
+        log_callback(f"[ZIP] Creating zip: {zip_path}\n")
+
+    _safe_makedirs(os.path.dirname(zip_path) or ".")
+
+    folder_to_backup = os.path.abspath(folder_to_backup)
+    parent = os.path.dirname(folder_to_backup)
+    folder_name = os.path.basename(folder_to_backup)
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # manifest.json at root
+        zf.writestr(GOOGLE_DRIVE_MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2))
+
+        # contents/* only: we store all children relative to folder_to_backup
+        for root, dirs, files in os.walk(folder_to_backup):
+            rel_root = os.path.relpath(root, folder_to_backup)
+            for fn in files:
+                abs_fp = os.path.join(root, fn)
+                rel_fp = os.path.join(rel_root, fn) if rel_root != "." else fn
+                # inside zip: contents/<rel_fp>
+                arcname = os.path.join("contents", rel_fp).replace("\\", "/")
+                zf.write(abs_fp, arcname=arcname)
+
+
+def _extract_zip_contents(zip_path: str, extract_dir: str, log_callback=None) -> str:
+    """Extract zip into extract_dir and return path to manifest.json."""
+    import zipfile
+
+    if log_callback:
+        log_callback(f"[ZIP] Extracting zip: {zip_path}\n")
+
+    _safe_makedirs(extract_dir)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(extract_dir)
+    return os.path.join(extract_dir, GOOGLE_DRIVE_MANIFEST_NAME)
+
+
+def _copy_contents_into_target(zip_extract_dir: str, target_dir: str, log_callback=None) -> dict:
+    """Copy contents/* into target_dir. Overwrite-safe: skip if destination exists."""
+    contents_dir = os.path.join(zip_extract_dir, "contents")
+    if not os.path.exists(contents_dir):
+        raise FileNotFoundError(f"Missing contents directory inside extracted zip: {contents_dir}")
+
+    copied = 0
+    skipped = 0
+    total = 0
+
+    for root, dirs, files in os.walk(contents_dir):
+        rel_root = os.path.relpath(root, contents_dir)
+        for fn in files:
+            total += 1
+            src_fp = os.path.join(root, fn)
+            rel_fp = os.path.join(rel_root, fn) if rel_root != "." else fn
+            dst_fp = os.path.join(target_dir, rel_fp)
+
+            _safe_makedirs(os.path.dirname(dst_fp))
+
+            if os.path.exists(dst_fp):
+                skipped += 1
+                continue
+
+            shutil.copy2(src_fp, dst_fp)
+            copied += 1
+
+    if log_callback:
+        log_callback(f"[RESTORE] Copied={copied}, skipped(existing)={skipped}, total={total}\n")
+
+    return {"copied": copied, "skipped": skipped, "total": total}
+
+
+def _get_script_dir() -> str:
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def drive_get_credentials(log_callback=None):
+    if not _drive_enabled():
+        raise RuntimeError("Google Drive backend unavailable (missing google-api-python-client deps).")
+
+    script_dir = _get_script_dir()
+    creds_path = os.path.join(script_dir, GOOGLE_OAUTH_CLIENT_SECRETS_FILE)
+    token_path = os.path.join(script_dir, GOOGLE_OAUTH_TOKEN_FILE)
+
+    if log_callback:
+        log_callback("[DRIVE] Loading/creating Google credentials...\n")
+
+    creds = None
+    if os.path.exists(token_path):
+        try:
+            creds = Credentials.from_authorized_user_file(token_path, GOOGLE_DRIVE_SCOPES)
+        except Exception:
+            creds = None
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            if log_callback:
+                log_callback("[DRIVE] Refreshing token...\n")
+            try:
+                creds.refresh(Request())
+            except Exception:
+                creds = None
+
+        if not creds or not creds.valid:
+            if not os.path.exists(creds_path):
+                raise FileNotFoundError(
+                    f"Missing OAuth client secrets file: {creds_path}. Provide 'credentials.json' in the same folder as this script."
+                )
+            if log_callback:
+                log_callback("[DRIVE] Starting OAuth flow...\n")
+            flow = InstalledAppFlow.from_client_secrets_file(creds_path, GOOGLE_DRIVE_SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        # save token
+        _safe_makedirs(os.path.dirname(token_path))
+        with open(token_path, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
+
+    return creds
+
+
+def drive_get_service(creds, log_callback=None):
+    if not _drive_enabled():
+        raise RuntimeError("Google Drive backend unavailable.")
+    if log_callback:
+        log_callback("[DRIVE] Building Drive service...\n")
+    return build("drive", "v3", credentials=creds)
+
+
+def drive_get_or_create_app_folder(service, log_callback=None) -> str:
+    """Returns folder id."""
+    q = f"name = '{GOOGLE_DRIVE_APP_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    resp = service.files().list(q=q, spaces="drive", fields="files(id, name)").execute()
+    files = resp.get("files", [])
+    if files:
+        fid = files[0]["id"]
+        if log_callback:
+            log_callback(f"[DRIVE] Using existing app folder: {GOOGLE_DRIVE_APP_FOLDER_NAME} (id={fid})\n")
+        return fid
+
+    metadata = {
+        "name": GOOGLE_DRIVE_APP_FOLDER_NAME,
+        "mimeType": "application/vnd.google-apps.folder",
+    }
+    created = service.files().create(body=metadata, fields="id").execute()
+    fid = created["id"]
+    if log_callback:
+        log_callback(f"[DRIVE] Created app folder: {GOOGLE_DRIVE_APP_FOLDER_NAME} (id={fid})\n")
+    return fid
+
+
+def drive_upload_backup_zip(service, folder_id: str, zip_path: str, manifest: dict, log_callback=None) -> str:
+    """Uploads the ZIP to drive and returns file id."""
+    if log_callback:
+        log_callback("[DRIVE] Uploading backup zip...\n")
+
+    timestamp = manifest.get("timestamp", "unknown")
+    game_root = manifest.get("game_root", "")
+    original_save_path = manifest.get("original_save_path", "")
+
+    # Make a relatively stable name: <game_root>_<timestamp>.zip
+    safe_root = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(game_root))[:80] or "save"
+    filename = f"{safe_root}_{timestamp}.zip"
+
+    file_metadata = {
+        "name": filename,
+        "parents": [folder_id],
+        "mimeType": GOOGLE_DRIVE_ZIP_MIME,
+    }
+
+    media = MediaFileUpload(zip_path, mimetype=GOOGLE_DRIVE_ZIP_MIME, resumable=True)
+
+    created = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    fid = created.get("id")
+    if log_callback:
+        log_callback(f"[DRIVE] Upload complete (file id={fid})\n")
+    return fid
+
+
+def drive_list_backups(service, folder_id: str, game_root: str | None = None, log_callback=None, limit: int = 20):
+    """Lists backups under app folder. Optionally filter by game_root text in manifest stored in file name (best-effort)."""
+    if log_callback:
+        log_callback("[DRIVE] Listing backups...\n")
+
+    # Drive cannot query inside manifest.json, so we filter by filename if provided.
+    q = f"'{folder_id}' in parents and trashed = false and mimeType = '{GOOGLE_DRIVE_ZIP_MIME}'"
+    if game_root:
+        safe_root = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(game_root))
+        if safe_root:
+            q += f" and name contains '{safe_root}'"
+
+    q += f" and not name contains 'manifest' "
+
+    resp = service.files().list(q=q, spaces="drive", fields="files(id, name, modifiedTime)", pageSize=limit).execute()
+    files = resp.get("files", [])
+    return files
+
+
+def drive_download_file(service, file_id: str, dest_path: str, log_callback=None):
+    if log_callback:
+        log_callback(f"[DRIVE] Downloading file id={file_id} to {dest_path}...\n")
+
+    _safe_makedirs(os.path.dirname(dest_path) or ".")
+
+    request = service.files().get_media(fileId=file_id)
+    with open(dest_path, "wb") as fh:
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+    if log_callback:
+        log_callback("[DRIVE] Download complete.\n")
+
+
+def drive_restore_backup_zip(service, file_id: str, target_dir: str, game_root_hint: str | None = None, log_callback=None):
+    """Downloads zip, extracts, then copies contents/* into target_dir with overwrite-safe skip."""
+    if log_callback:
+        log_callback("[RESTORE] Starting restore...\n")
+
+    with tempfile.TemporaryDirectory(prefix="savefinder_restore_") as tmp:
+        zip_path = os.path.join(tmp, "backup.zip")
+        drive_download_file(service, file_id, zip_path, log_callback=log_callback)
+
+        manifest_path = _extract_zip_contents(zip_path, tmp, log_callback=log_callback)
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        # Prefer detected result path (target_dir passed in). Fallback to manifest.
+        final_target = target_dir
+        if not final_target and manifest.get("original_save_path"):
+            final_target = manifest.get("original_save_path")
+        if not final_target:
+            raise RuntimeError("Restore target directory not provided and manifest has no original_save_path.")
+
+        final_target = os.path.abspath(final_target)
+        _safe_makedirs(final_target)
+
+        stats = _copy_contents_into_target(tmp, final_target, log_callback=log_callback)
+
+        return {"manifest": manifest, "target": final_target, "stats": stats}
+
+
+
 
 # --- BACKEND LOGIC ---
 
@@ -108,7 +404,62 @@ def get_unreal_project_name(game_directory):
 
 def run_save_finder(game_directory, log_callback, success_callback):
     """Executes the deep scan logic and routes output back to the GUI."""
+
+    def verify_has_plausible_save_files(root_path: str) -> bool:
+        """Lightweight validation: ensure the candidate contains plausible save files."""
+        # Common save extensions across many games/emulators (not exhaustive)
+        plausible_exts = {
+            ".sav",
+            ".save",
+            ".json",
+            ".bin",
+            ".dat",
+            ".slot",
+            ".profile",
+            ".cfg",
+            ".xml",
+            ".dat2",
+        }
+
+        # Only scan a tiny portion of the tree for performance.
+        # - check the candidate root itself
+        # - check immediate Unreal subfolder Saved/SaveGames
+        # - check immediate children of those folders
+        check_roots = [root_path]
+        unreal_save = os.path.join(root_path, "Saved", "SaveGames")
+        if os.path.exists(unreal_save):
+            check_roots.append(unreal_save)
+
+        for cr in check_roots:
+            try:
+                # 1) files directly inside cr
+                for name in os.listdir(cr):
+                    p = os.path.join(cr, name)
+                    if os.path.isfile(p):
+                        ext = os.path.splitext(name)[1].lower()
+                        if ext in plausible_exts:
+                            return True
+
+                # 2) files one level below (still fast)
+                for name in os.listdir(cr):
+                    p = os.path.join(cr, name)
+                    if os.path.isdir(p):
+                        try:
+                            for child in os.listdir(p):
+                                cp = os.path.join(p, child)
+                                if os.path.isfile(cp):
+                                    ext = os.path.splitext(child)[1].lower()
+                                    if ext in plausible_exts:
+                                        return True
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        return False
+
     ini_files_to_check = [
+
         "steam_emu.ini",
         "steam_api.ini",
         "steam_api64.ini",
@@ -417,13 +768,18 @@ class SaveFinderApp(ctk.CTk):
             while True:
                 level, text = self._log_queue.get_nowait()
                 tag = f"lvl_{level}"
-                if not self.console_output.tag_cget(tag, "foreground"):
-                    color_map = {
-                        "INFO": "#d0d0d0",
-                        "SUCCESS": "#44dd55",
-                        "WARN": "#ffcc00",
-                        "ERROR": "#ff4444",
-                    }
+                color_map = {
+                    "INFO": "#d0d0d0",
+                    "SUCCESS": "#44dd55",
+                    "WARN": "#ffcc00",
+                    "ERROR": "#ff4444",
+                }
+
+                # Ensure the tag exists before querying it (prevents: TclError: tag "lvl_INFO" isn't defined)
+                try:
+                    if not self.console_output.tag_cget(tag, "foreground"):
+                        self.console_output.tag_config(tag, foreground=color_map.get(level, "#d0d0d0"))
+                except Exception:
                     self.console_output.tag_config(tag, foreground=color_map.get(level, "#d0d0d0"))
 
                 self.console_output.configure(state="normal")
@@ -516,7 +872,29 @@ class SaveFinderApp(ctk.CTk):
         open_btn = ctk.CTkButton(header, text="Open", width=70, command=lambda p=root_path: self._open_in_explorer(p))
         open_btn.pack(side="right", padx=(0, 10))
 
+        backup_btn = ctk.CTkButton(
+            header,
+            text="Backup",
+            width=90,
+            command=lambda p=root_path: self.start_backup(p),
+        )
+        backup_btn.pack(side="right", padx=(0, 6))
+
+        restore_btn = ctk.CTkButton(
+            header,
+            text="Restore",
+            width=90,
+            command=lambda p=root_path: self.start_restore(p),
+        )
+        restore_btn.pack(side="right", padx=(0, 6))
+
+
         self._tree_sections.append(section)
+
+    def _safe_drive_action_start_log(self, action: str, target_path: str):
+        # Ensure we always show immediate feedback in the UI console.
+        self._append_log_text(f"\n[DRIVE] {action} clicked for:\n-> {target_path}\n")
+
 
     def _populate_children(self, children_frame, root_path: str, max_items: int = 200):
         """List immediate subfolders under root_path (tree children)."""
@@ -555,15 +933,140 @@ class SaveFinderApp(ctk.CTk):
             lbl = ctk.CTkLabel(row, text=name, anchor="w", font=ctk.CTkFont(size=11))
             lbl.pack(side="left", fill="x", expand=True, padx=(10, 10))
 
-            # Allow selecting leaf subfolder: Copy/Open
-            cbtn = ctk.CTkButton(row, text="Copy", width=60, command=lambda p=sp: self._copy_path(p))
+            # Allow selecting leaf subfolder: Copy/Open/Backup/Restore
+            cbtn = ctk.CTkButton(row, text="Copy", width=52, command=lambda p=sp: self._copy_path(p))
             cbtn.pack(side="right", padx=(0, 6))
 
-            obtn = ctk.CTkButton(row, text="Open", width=60, command=lambda p=sp: self._open_in_explorer(p))
+            obtn = ctk.CTkButton(row, text="Open", width=52, command=lambda p=sp: self._open_in_explorer(p))
             obtn.pack(side="right", padx=(0, 6))
 
+            backup_btn = ctk.CTkButton(row, text="Backup", width=70, command=lambda p=sp: self.start_backup(p))
+            backup_btn.pack(side="right", padx=(0, 6))
+
+            restore_btn = ctk.CTkButton(row, text="Restore", width=70, command=lambda p=sp: self.start_restore(p))
+            restore_btn.pack(side="right", padx=(0, 6))
+
+
+
+    def _ensure_drive_available_or_log(self):
+        if not _drive_enabled():
+            self._append_log_text("\n[DRIVE] Google Drive backend not available (install google-api-python-client + deps).\n")
+            return False
+        return True
+
+    def start_backup(self, root_path: str):
+        if not root_path or not os.path.isdir(root_path):
+            self._append_log_text("\n[ERROR] Backup target is not a valid directory.\n")
+            return
+        if not self._ensure_drive_available_or_log():
+            return
+
+        def _log_worker(message: str):
+            msg = (message or "").strip()
+            upper = msg.upper()
+            level = "INFO"
+            if msg.startswith("[SUCCESS]") or "[SUCCESS]" in msg or "SUCCESS" in upper:
+                level = "SUCCESS"
+            elif msg.startswith("[FAILED]") or "FAILED" in upper or "ERROR" in upper or msg.startswith("[ERROR]"):
+                level = "ERROR"
+            elif "WARN" in upper:
+                level = "WARN"
+            self._queue_log(level, message)
+
+        threading.Thread(
+            target=self._backup_to_drive_worker,
+            args=(root_path, _log_worker),
+            daemon=True,
+        ).start()
+
+    def _backup_to_drive_worker(self, root_path: str, log_worker):
+        try:
+            log_worker("\n[DRIVE] Backup started...\n")
+            creds = drive_get_credentials(log_callback=log_worker)
+            service = drive_get_service(creds, log_callback=log_worker)
+            folder_id = drive_get_or_create_app_folder(service, log_callback=log_worker)
+
+            # manifest.json per TODO_CLOUD.md (best-effort hints)
+            raw_game_root_name = os.path.basename(os.path.normpath(root_path))
+            manifest = {
+                "timestamp": datetime.now().strftime("%Y%m%d-%H%M%S"),
+                "game_root": raw_game_root_name,
+                "original_save_path": root_path,
+                "restore_target_hint": "original_save_path",
+            }
+
+            with tempfile.TemporaryDirectory(prefix="savefinder_backup_") as tmp:
+                zip_path = os.path.join(tmp, "backup.zip")
+                _create_zip_with_manifest(zip_path, manifest=manifest, folder_to_backup=root_path, log_callback=log_worker)
+                file_id = drive_upload_backup_zip(service, folder_id, zip_path, manifest, log_callback=log_worker)
+
+            log_worker(f"[SUCCESS] Backup uploaded to Drive (file id={file_id}).\n")
+        except Exception as e:
+            log_worker(f"[ERROR] Backup failed: {e}\n")
+
+    def start_restore(self, root_path: str):
+        if not root_path or not os.path.isdir(root_path):
+            self._append_log_text("\n[ERROR] Restore target is not a valid directory.\n")
+            return
+        if not self._ensure_drive_available_or_log():
+            return
+
+        def _log_worker(message: str):
+            msg = (message or "").strip()
+            upper = msg.upper()
+            level = "INFO"
+            if msg.startswith("[SUCCESS]") or "[SUCCESS]" in msg or "SUCCESS" in upper:
+                level = "SUCCESS"
+            elif msg.startswith("[FAILED]") or "FAILED" in upper or "ERROR" in upper or msg.startswith("[ERROR]"):
+                level = "ERROR"
+            elif "WARN" in upper:
+                level = "WARN"
+            self._queue_log(level, message)
+
+        threading.Thread(
+            target=self._restore_from_drive_worker,
+            args=(root_path, _log_worker),
+            daemon=True,
+        ).start()
+
+    def _restore_from_drive_worker(self, root_path: str, log_worker):
+        try:
+            log_worker("\n[DRIVE] Restore started...\n")
+            creds = drive_get_credentials(log_callback=log_worker)
+            service = drive_get_service(creds, log_callback=log_worker)
+            folder_id = drive_get_or_create_app_folder(service, log_callback=log_worker)
+
+            game_root_guess = os.path.basename(os.path.normpath(root_path))
+            backups = drive_list_backups(service, folder_id, game_root=game_root_guess, log_callback=log_worker, limit=10)
+
+            if not backups:
+                log_worker("[ERROR] No backups found on Drive for this save location.\n")
+                return
+
+            # pick newest by modifiedTime if present (best-effort)
+            backups.sort(key=lambda x: x.get("modifiedTime", ""), reverse=True)
+            chosen = backups[0]
+            file_id = chosen["id"]
+
+            log_worker(f"[DRIVE] Using backup file id={file_id} (name={chosen.get('name','')}).\n")
+
+            result = drive_restore_backup_zip(
+                service,
+                file_id=file_id,
+                target_dir=root_path,
+                game_root_hint=game_root_guess,
+                log_callback=log_worker,
+            )
+
+            stats = result.get("stats", {})
+            log_worker(
+                f"[SUCCESS] Restore complete. copied={stats.get('copied')}, skipped={stats.get('skipped')}, total={stats.get('total')}.\n"
+            )
+        except Exception as e:
+            log_worker(f"[ERROR] Restore failed: {e}\n")
 
     def start_scan(self):
+
         target_dir = self.path_entry.get().strip()
         if not target_dir:
             self.clear_console()
