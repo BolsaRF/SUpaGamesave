@@ -66,6 +66,19 @@ class ResultsView:
         except Exception:
             pass
 
+    def _bind_dynamic_wraplength(self, label):
+        # A fixed wraplength only works for a fixed-width panel. Now that
+        # the results panel can be dragged narrower/wider (main_paned in
+        # gui_app.py), the wrap point needs to track the label's actual
+        # current width instead, or long paths clip again at narrow widths.
+        def _on_configure(event, lbl=label):
+            try:
+                lbl.configure(wraplength=max(100, event.width - 4))
+            except Exception:
+                pass
+
+        label.bind("<Configure>", _on_configure)
+
     def _populate_children(self, children_frame, root_path: str, max_items: int = 200):
         for w in getattr(children_frame, "winfo_children", lambda: [])():
             try:
@@ -103,8 +116,9 @@ class ResultsView:
             row.pack(fill="x", padx=(18, 8), pady=2)
 
             name = os.path.basename(sp)
-            lbl = ctk.CTkLabel(row, text=name, anchor="w", justify="left", wraplength=420, font=ctk.CTkFont(size=11))
+            lbl = ctk.CTkLabel(row, text=name, anchor="w", justify="left", font=ctk.CTkFont(size=11))
             lbl.pack(fill="x", padx=(10, 10), pady=(2, 0))
+            self._bind_dynamic_wraplength(lbl)
 
             actions_row = ctk.CTkFrame(row, fg_color="transparent")
             actions_row.pack(fill="x", padx=(10, 0), pady=(2, 2))
@@ -162,10 +176,10 @@ class ResultsView:
             text=root_path,
             anchor="w",
             justify="left",
-            wraplength=520,
             font=ctk.CTkFont(size=12),
         )
         root_label.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=4)
+        self._bind_dynamic_wraplength(root_label)
 
         if self.callbacks.on_label_double_click_restore:
             try:

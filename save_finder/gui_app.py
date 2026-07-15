@@ -311,12 +311,16 @@ class SaveFinderApp(ctk.CTk):
             sashrelief="raised",
             bg="#242424",
             bd=0,
+            # Only resize the panes once on release, not on every pixel of
+            # drag movement — with this many nested widgets inside each
+            # pane, live-resizing during drag is visibly laggy.
+            opaqueresize=False,
         )
         self.main_paned.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
 
         # Results panel (left)
         self.results_frame = ctk.CTkFrame(self.main_paned)
-        self.main_paned.add(self.results_frame, minsize=400, stretch="always")
+        self.main_paned.add(self.results_frame, minsize=520, stretch="always")
         self.results_frame.grid_rowconfigure(0, weight=0)
         self.results_frame.grid_rowconfigure(1, weight=1)
         self.results_frame.grid_columnconfigure(0, weight=1)
@@ -341,7 +345,7 @@ class SaveFinderApp(ctk.CTk):
 
         # Profiles panel (right)
         self.profiles_frame = ctk.CTkFrame(self.main_paned)
-        self.main_paned.add(self.profiles_frame, minsize=400, stretch="always")
+        self.main_paned.add(self.profiles_frame, minsize=560, stretch="always")
         self.profiles_frame.grid_rowconfigure(5, weight=1)
         self.profiles_frame.grid_columnconfigure(0, weight=1)
 
