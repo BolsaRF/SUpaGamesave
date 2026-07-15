@@ -227,6 +227,8 @@ class ProfilesView:
         self._clear_profiles_widgets()
 
         visible_profiles = profile_info or []
+        app._known_profile_names = [pr["name"] for pr in visible_profiles if pr.get("name")]
+
         if not visible_profiles:
             label = ctk.CTkLabel(app.profiles_list_scroll, text="(no profiles found)", text_color="gray")
             label.pack(anchor="w", padx=10, pady=6)

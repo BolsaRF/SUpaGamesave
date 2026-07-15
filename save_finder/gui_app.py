@@ -1118,12 +1118,44 @@ class SaveFinderApp(ctk.CTk):
             cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._- ")
         return cleaned or None
 
+    def _match_existing_profile_name(self, name: str) -> str:
+        """If a profile with this name (case-insensitive) is already in the
+        sidebar, return its exact existing name instead of a fresh guess.
+
+        Prevents near-duplicate profiles (e.g. "octopath traveler 0" vs an
+        existing "Octopath Traveler 0") since Drive folder names are
+        case-sensitive even though this comparison isn't.
+        """
+        for existing in getattr(self, "_known_profile_names", []) or []:
+            if existing.strip().lower() == name.strip().lower():
+                return existing
+        return name
+
     def _default_backup_profile_name(self, root_path: str | None = None) -> str:
         for candidate in [self.path_entry.get().strip(), root_path]:
             name = self._derive_profile_name_from_path(candidate)
             if name:
-                return name
-        return self._detected_save_root_name(root_path) if root_path else "Default"
+                return self._match_existing_profile_name(name)
+
+        # The save folder's own name might just be a generic launcher/
+        # platform tag (e.g. "steam", "epic", "gog") that gets cleaned to
+        # nothing above. Walk up to parent folders looking for the actual
+        # game name instead of falling back to that raw, uncleaned name.
+        if root_path:
+            current = os.path.dirname(os.path.normpath(root_path))
+            for _ in range(4):
+                if not current:
+                    break
+                name = self._derive_profile_name_from_path(current)
+                if name:
+                    return self._match_existing_profile_name(name)
+                parent = os.path.dirname(current)
+                if not parent or parent == current:
+                    break
+                current = parent
+
+        fallback = self._detected_save_root_name(root_path) if root_path else "Default"
+        return self._match_existing_profile_name(fallback)
 
     def start_scan(self):
         target_dir = self.path_entry.get().strip()
