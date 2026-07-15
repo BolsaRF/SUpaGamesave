@@ -207,7 +207,10 @@ class SaveFinderApp(ctk.CTk):
             self.geometry(saved_geometry or "1280x760")
         except Exception:
             self.geometry("1280x760")
-        self.minsize(1200, 760)
+        # Wide enough that the window itself can't be shrunk below what the
+        # two panes need (a pane's minsize only stops the sash being
+        # dragged past it, not the whole window being resized smaller).
+        self.minsize(1360, 760)
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
@@ -345,7 +348,7 @@ class SaveFinderApp(ctk.CTk):
 
         # Profiles panel (right)
         self.profiles_frame = ctk.CTkFrame(self.main_paned)
-        self.main_paned.add(self.profiles_frame, minsize=560, stretch="always")
+        self.main_paned.add(self.profiles_frame, minsize=700, stretch="always")
         self.profiles_frame.grid_rowconfigure(5, weight=1)
         self.profiles_frame.grid_columnconfigure(0, weight=1)
 
@@ -355,14 +358,18 @@ class SaveFinderApp(ctk.CTk):
         self.profiles_controls = ctk.CTkFrame(self.profiles_frame, fg_color="transparent")
         self.profiles_controls.pack(fill="x", padx=10, pady=(5, 8))
 
-        # Row 1: profile actions. Row 2: storage backend settings.
-        # Split into two rows so the controls stay reachable at normal window
-        # widths instead of overflowing a single side="left" row off-screen.
+        # Row 1: profile actions. Row 2: storage backend + local path.
+        # Row 3: folder shortcuts + start-at-login. Split across three rows
+        # (rather than one wide guess at a minimum panel width) so no single
+        # row needs more than ~450px, leaving real margin for DPI scaling.
         self.profiles_controls_row1 = ctk.CTkFrame(self.profiles_controls, fg_color="transparent")
         self.profiles_controls_row1.pack(fill="x")
 
         self.profiles_controls_row2 = ctk.CTkFrame(self.profiles_controls, fg_color="transparent")
         self.profiles_controls_row2.pack(fill="x", pady=(6, 0))
+
+        self.profiles_controls_row3 = ctk.CTkFrame(self.profiles_controls, fg_color="transparent")
+        self.profiles_controls_row3.pack(fill="x", pady=(6, 0))
 
         self.profiles_refresh_btn = ctk.CTkButton(self.profiles_controls_row1, text="Refresh", width=100, command=self.refresh_profiles_ui)
         self.profiles_refresh_btn.pack(side="left", padx=(0, 8))
@@ -419,17 +426,17 @@ class SaveFinderApp(ctk.CTk):
         self._start_at_login = load_setting(self._settings_path, APP_SETTINGS_START_AT_LOGIN, "0") == "1"
         self.start_at_login_var = ctk.BooleanVar(value=self._start_at_login)
         self.start_at_login_checkbox = ctk.CTkCheckBox(
-            self.profiles_controls_row2,
+            self.profiles_controls_row3,
             text="Start at login",
             variable=self.start_at_login_var,
             command=self._on_start_at_login_toggled,
         )
-        self.start_at_login_checkbox.pack(side="left", padx=(8, 0))
+        self.start_at_login_checkbox.pack(side="left", padx=(0, 0))
 
-        self.open_profile_folder_btn = ctk.CTkButton(self.profiles_controls_row2, text="Open Profile Folder", width=140, command=self._open_selected_profile_folder)
+        self.open_profile_folder_btn = ctk.CTkButton(self.profiles_controls_row3, text="Open Profile Folder", width=140, command=self._open_selected_profile_folder)
         self.open_profile_folder_btn.pack(side="left", padx=(8, 0))
 
-        self.view_storage_root_btn = ctk.CTkButton(self.profiles_controls_row2, text="View Storage Root", width=130, command=self._view_storage_root)
+        self.view_storage_root_btn = ctk.CTkButton(self.profiles_controls_row3, text="View Storage Root", width=130, command=self._view_storage_root)
         self.view_storage_root_btn.pack(side="left", padx=(8, 0))
 
         self.storage_backend = "drive" if self.storage_backend_var.get().lower() == "drive" else "local"
