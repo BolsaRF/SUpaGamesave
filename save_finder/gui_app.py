@@ -1516,6 +1516,10 @@ class SaveFinderApp(ctk.CTk):
             chosen_file_id = chosen_newest["id"]
             log_worker(f"[STORAGE] Restoring newest backup: {chosen_newest.get('name','')}\n")
 
+            if os.path.isdir(target_dir) and os.listdir(target_dir):
+                log_worker(f"[SAFETY] Backing up current state of '{target_dir}' before restoring...\n")
+                self._backup_to_drive_worker(target_dir, profile_name, save_root, log_worker)
+
             if self.storage_backend == "drive":
                 result = drive_restore_backup_zip(service, file_id=chosen_file_id, target_dir=target_dir, log_callback=log_worker)
             else:
@@ -1623,8 +1627,26 @@ class SaveFinderApp(ctk.CTk):
         if not os.path.exists(target_dir):
             os.makedirs(target_dir, exist_ok=True)
 
+        def _log_worker(message: str):
+            msg = (message or "").strip()
+            upper = msg.upper()
+            level = "INFO"
+            if "SUCCESS" in upper:
+                level = "SUCCESS"
+            elif "ERROR" in upper or "FAILED" in upper:
+                level = "ERROR"
+            elif "WARN" in upper:
+                level = "WARN"
+            self._queue_log(level, message)
+
         def _worker():
             try:
+                if os.path.isdir(target_dir) and os.listdir(target_dir):
+                    profile_name = self.selected_profile_name or self._detected_save_root_name(target_dir)
+                    save_root = self._detected_save_root_name(target_dir)
+                    _log_worker(f"[SAFETY] Backing up current state of '{target_dir}' before restoring...\n")
+                    self._backup_to_drive_worker(target_dir, profile_name, save_root, _log_worker)
+
                 if self.storage_backend == "drive":
                     if not self._ensure_drive_available_or_log():
                         return

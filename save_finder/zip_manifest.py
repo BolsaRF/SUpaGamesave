@@ -47,7 +47,12 @@ def extract_zip_contents(zip_path: str, extract_dir: str, log_callback=None) -> 
 
 
 def copy_contents_into_target(zip_extract_dir: str, target_dir: str, log_callback=None) -> dict:
-    """Copy contents/* into target_dir. Overwrite-safe: skip if destination exists."""
+    """Copy contents/* into target_dir, overwriting any existing files.
+
+    Restoring is meant to replace the current save state with the backup's,
+    so this always overwrites — callers wanting a safety net should back up
+    target_dir before calling this (see SaveFinderApp's restore workers).
+    """
     contents_dir = os.path.join(zip_extract_dir, "contents")
     if not os.path.exists(contents_dir):
         raise FileNotFoundError(f"Missing contents directory inside extracted zip: {contents_dir}")
@@ -65,10 +70,6 @@ def copy_contents_into_target(zip_extract_dir: str, target_dir: str, log_callbac
             dst_fp = os.path.join(target_dir, rel_fp)
 
             safe_makedirs(os.path.dirname(dst_fp))
-
-            if os.path.exists(dst_fp):
-                skipped += 1
-                continue
 
             shutil.copy2(src_fp, dst_fp)
             copied += 1
