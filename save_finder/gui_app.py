@@ -198,6 +198,11 @@ class SaveFinderApp(ctk.CTk):
         self._auto_backup_state: dict[str, dict[str, object]] = {}
         self._auto_backup_in_progress: set[str] = set()
         self._auto_backup_interval_ms = 30000
+        # path -> profile name, for every profile's resolved save location —
+        # rebuilt periodically so auto-backup watches all profiles, not just
+        # whatever's currently shown in "Detected Save Locations".
+        self._auto_backup_targets: dict[str, str] = {}
+        self._auto_backup_targets_refresh_ms = 180000
         self._auto_backup_enabled = load_setting(self._settings_path, APP_SETTINGS_AUTO_BACKUP, "0") == "1"
 
         # Window
@@ -393,7 +398,11 @@ class SaveFinderApp(ctk.CTk):
             variable=self.auto_backup_var,
             command=self._on_auto_backup_toggled,
         )
-        self.auto_backup_checkbox._is_packed = False
+        # Always visible now — auto-backup watches all profiles
+        # independently of whatever's selected/displayed, not just
+        # whatever's currently shown in "Detected Save Locations".
+        self.auto_backup_checkbox.pack(side="left", padx=(10, 6))
+        self.auto_backup_checkbox._is_packed = True
 
         # Storage backend selector + local backups path
         stored_backend = load_setting(self._settings_path, APP_SETTINGS_STORAGE_BACKEND, "Drive" if _drive_enabled() else "Local") or (
@@ -474,6 +483,7 @@ class SaveFinderApp(ctk.CTk):
         self.selected_profile_name = self._load_selected_profile_name()
         self.after(200, self.refresh_profiles_ui)
         self.after(5000, self._auto_backup_poll)
+        self.after(6000, self._refresh_auto_backup_targets_async)
         self.after(50, self._restore_panel_split)
 
         # Tray
@@ -854,19 +864,16 @@ class SaveFinderApp(ctk.CTk):
         self._append_log_text("\n[INFO] No saved locations available for this profile yet.\n")
 
     def _update_auto_backup_checkbox_visibility(self):
-        has_valid_auto_backup_target = bool(self.selected_profile_name and self.discovered_paths)
-        if has_valid_auto_backup_target:
+        # Auto-backup now watches all profiles independently of what's
+        # selected/displayed (see _auto_backup_targets), so the checkbox
+        # is unconditionally kept visible/enabled here.
+        try:
             if not getattr(self.auto_backup_checkbox, "_is_packed", False):
                 self.auto_backup_checkbox.pack(side="left", padx=(10, 6))
                 self.auto_backup_checkbox._is_packed = True
             self.auto_backup_checkbox.configure(state="normal")
-        else:
-            try:
-                if getattr(self.auto_backup_checkbox, "_is_packed", False):
-                    self.auto_backup_checkbox.pack_forget()
-                    self.auto_backup_checkbox._is_packed = False
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     def _toggle_results_visibility(self):
         self.results_visible = not getattr(self, "results_visible", True)
@@ -1006,10 +1013,36 @@ class SaveFinderApp(ctk.CTk):
         self._save_app_setting(APP_SETTINGS_AUTO_BACKUP, "1" if self._auto_backup_enabled else "0")
         if self._auto_backup_enabled:
             self._reset_auto_backup_state()
+            self._spawn_auto_backup_targets_scan()
         try:
             self._update_tray_state()
         except Exception:
             pass
+
+    def _spawn_auto_backup_targets_scan(self):
+        def _log(message: str):
+            msg = (message or "").strip()
+            upper = msg.upper()
+            level = "INFO"
+            if "SUCCESS" in upper:
+                level = "SUCCESS"
+            elif "ERROR" in upper or "FAILED" in upper:
+                level = "ERROR"
+            elif "WARN" in upper:
+                level = "WARN"
+            self._queue_log(level, message)
+
+        def _worker():
+            self._auto_backup_targets = self.profiles_view.build_auto_backup_targets(log_callback=_log)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _refresh_auto_backup_targets_async(self):
+        try:
+            if self._auto_backup_enabled:
+                self._spawn_auto_backup_targets_scan()
+        finally:
+            self.after(self._auto_backup_targets_refresh_ms, self._refresh_auto_backup_targets_async)
 
     def _choose_local_root(self):
         sel = filedialog.askdirectory()
@@ -1049,8 +1082,8 @@ class SaveFinderApp(ctk.CTk):
 
     def _auto_backup_poll(self):
         try:
-            if self._auto_backup_enabled and self.discovered_paths:
-                for path in list(self.discovered_paths):
+            if self._auto_backup_enabled and self._auto_backup_targets:
+                for path in list(self._auto_backup_targets.keys()):
                     if path in self._auto_backup_in_progress:
                         continue
                     if not os.path.isdir(path):
@@ -1086,9 +1119,10 @@ class SaveFinderApp(ctk.CTk):
                             level = "WARN"
                         self._queue_log(level, message)
 
-                    # Global auto-backup: determine the target profile for each save root
-                    # without mutating the UI-selected profile.
-                    profile_name = self._default_backup_profile_name(path)
+                    # Every watched path came from an existing profile
+                    # (built by build_auto_backup_targets), so its profile
+                    # name is already known — no guessing needed.
+                    profile_name = self._auto_backup_targets.get(path) or self._default_backup_profile_name(path)
 
                     threading.Thread(
                         target=self._auto_backup_worker,

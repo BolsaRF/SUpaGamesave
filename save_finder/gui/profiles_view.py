@@ -59,6 +59,64 @@ class ProfilesView:
         self.app = app
         self.callbacks = callbacks
 
+    def _list_profile_backups_grouped(self, service, profile_id):
+        """List a profile's backups and group them by save_root.
+
+        Returns (backups, managed) where managed maps save_root -> list of
+        backup entries, parsed from each backup's filename.
+        """
+        app = self.app
+        if app.storage_backend == "drive":
+            backups = drive_list_profile_backups(service, profile_id, save_root=None, log_callback=None, limit=200)
+        else:
+            backups = localfs_list_profile_backups(profile_id, save_root=None, log_callback=None, limit=200)
+        backups = backups or []
+
+        managed: dict[str, list[dict]] = {}
+        for b in backups:
+            parsed = parse_zip_name_for_fields(b.get("name", ""))
+            sr = parsed.get("save_root")
+            if not sr:
+                continue
+            managed.setdefault(sr, []).append(b)
+
+        return backups, managed
+
+    def build_auto_backup_targets(self, log_callback=None) -> dict[str, str]:
+        """Resolve every profile's managed save paths to their profile name.
+
+        Used by auto-backup to watch all existing profiles' saves, not just
+        whichever one happens to be selected in the sidebar.
+        """
+        app = self.app
+        targets: dict[str, str] = {}
+        try:
+            service = None
+            app_folder_id = None
+            if app.storage_backend == "drive":
+                if not _drive_enabled():
+                    return targets
+                creds = drive_get_credentials(log_callback=log_callback)
+                service = drive_get_service(creds, log_callback=log_callback)
+                app_folder_id = drive_get_or_create_app_folder(service, log_callback=log_callback)
+                profiles = drive_list_profiles(service, app_folder_id, log_callback=log_callback)
+            else:
+                profiles = localfs_list_profiles(app.local_backups_root, log_callback=log_callback)
+
+            for pr in profiles or []:
+                _backups, managed = self._list_profile_backups_grouped(service, pr["id"])
+                for sr, files in managed.items():
+                    newest = _pick_newest_by_modifiedTime(files)
+                    if not newest:
+                        continue
+                    resolved_path = self._read_backup_manifest_path(service, newest.get("id"), fallback_save_root=None)
+                    if resolved_path and os.path.isdir(resolved_path):
+                        targets[resolved_path] = pr["name"]
+        except Exception as e:
+            if log_callback:
+                log_callback(f"[WARN] Auto-backup target scan failed: {e}\n")
+        return targets
+
     def refresh_profiles_ui(self, prefer_local_results: bool = False):
         app = self.app
         if app._profiles_refreshing:
@@ -116,18 +174,7 @@ class ProfilesView:
                 if selected:
                     sel = next((x for x in profile_info if x["name"] == selected), None)
                     if sel:
-                        if app.storage_backend == "drive":
-                            backups = drive_list_profile_backups(service, sel["id"], save_root=None, log_callback=None, limit=200)
-                        else:
-                            backups = localfs_list_profile_backups(sel["id"], save_root=None, log_callback=None, limit=200)
-                        selected_profile_backups = backups or []
-
-                        for b in backups:
-                            parsed = parse_zip_name_for_fields(b.get("name", ""))
-                            sr = parsed.get("save_root")
-                            if not sr:
-                                continue
-                            managed.setdefault(sr, []).append(b)
+                        selected_profile_backups, managed = self._list_profile_backups_grouped(service, sel["id"])
 
                         for sr, files in managed.items():
                             newest = _pick_newest_by_modifiedTime(files)
