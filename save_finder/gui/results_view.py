@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -57,12 +56,6 @@ class ResultsView:
         try:
             self.app.clipboard_clear()
             self.app.clipboard_append(path)
-        except Exception:
-            pass
-
-    def _open_in_explorer(self, path: str):
-        try:
-            subprocess.Popen(["explorer", path])
         except Exception:
             pass
 
@@ -126,7 +119,7 @@ class ResultsView:
             cbtn = ctk.CTkButton(actions_row, text="Copy", width=52, command=lambda p=sp: self._copy_path(p))
             cbtn.pack(side="left", padx=(0, 6))
 
-            obtn = ctk.CTkButton(actions_row, text="Open", width=52, command=lambda p=sp: self._open_in_explorer(p))
+            obtn = ctk.CTkButton(actions_row, text="Open", width=52, command=lambda p=sp: self.app._open_in_explorer(p))
             obtn.pack(side="left", padx=(0, 6))
 
             backup_btn = ctk.CTkButton(actions_row, text="Backup", width=70, command=lambda p=sp: self.callbacks.on_backup_clicked(p))
@@ -197,7 +190,7 @@ class ResultsView:
         copy_btn = ctk.CTkButton(actions_row, text="Copy", width=64, command=lambda p=root_path: self._copy_path(p))
         copy_btn.pack(side="left", padx=(36, 6))
 
-        open_btn = ctk.CTkButton(actions_row, text="Open", width=64, command=lambda p=root_path: self._open_in_explorer(p))
+        open_btn = ctk.CTkButton(actions_row, text="Open", width=64, command=lambda p=root_path: self.app._open_in_explorer(p))
         open_btn.pack(side="left", padx=(0, 6))
 
         backup_btn = ctk.CTkButton(actions_row, text="Backup", width=80, command=lambda p=root_path: self.callbacks.on_backup_clicked(p))

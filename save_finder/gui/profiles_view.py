@@ -483,7 +483,7 @@ class ProfilesView:
         app.selected_profile_name = str(name).strip()
         app._save_selected_profile_name()
 
-        if not app._ensure_drive_available_or_log():
+        if app.storage_backend == "drive" and not app._ensure_drive_available_or_log():
             return
 
         def _log_worker(message: str):

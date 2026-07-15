@@ -270,8 +270,6 @@ class SaveFinderApp(ctk.CTk):
         main_frame.pack(fill="both", expand=True, padx=30, pady=(5, 0))
 
         main_frame.grid_rowconfigure(4, weight=1)
-        main_frame.grid_columnconfigure(0, weight=1, minsize=560)
-        main_frame.grid_columnconfigure(1, weight=1, minsize=520)
 
         # Logs
         self.log_label = ctk.CTkLabel(main_frame, text="Console Log Output", font=ctk.CTkFont(size=14, weight="bold"))
@@ -296,6 +294,8 @@ class SaveFinderApp(ctk.CTk):
         self.console_output = ctk.CTkTextbox(main_frame, height=95, font=ctk.CTkFont(family="Consolas", size=12))
         self.console_output.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=(0, 0), pady=(5, 10))
         self.console_output.configure(state="disabled")
+
+        self.log_view = LogView(self)
 
         self.upload_progress_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         self.upload_progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=(0, 0), pady=(0, 10))
@@ -350,6 +350,12 @@ class SaveFinderApp(ctk.CTk):
         self.results_scroll = ctk.CTkScrollableFrame(self.results_frame, fg_color="transparent")
         self.results_scroll.pack(fill="both", expand=True, padx=10, pady=10)
         self.results_visible = True
+
+        self.results_view = ResultsView(self, ResultsCallbacks(
+            on_restore_clicked=self.start_restore,
+            on_backup_clicked=self.start_backup,
+            on_label_double_click_restore=self._on_label_double_click_restore,
+        ))
 
         # Profiles panel (right)
         self.profiles_frame = ctk.CTkFrame(self.main_paned)
@@ -521,7 +527,7 @@ class SaveFinderApp(ctk.CTk):
 
     # -------- logging helpers --------
     def _toggle_autoscroll(self):
-        self._log_autoscroll = bool(self.autoscroll_var.get())
+        self.log_view._toggle_autoscroll()
 
     def browse_folder(self):
         selected_dir = filedialog.askdirectory()
@@ -530,50 +536,16 @@ class SaveFinderApp(ctk.CTk):
             self.path_entry.insert(0, os.path.normpath(selected_dir))
 
     def clear_console(self):
-        self.console_output.configure(state="normal")
-        self.console_output.delete("1.0", "end")
-        self.console_output.configure(state="disabled")
-
-    def _format_timestamp(self) -> str:
-        return datetime.now().strftime("%H:%M:%S")
+        self.log_view.clear_console()
 
     def _queue_log(self, level: str, message: str):
-        ts = self._format_timestamp()
-        self._log_queue.put((level, f"[{ts}] {message}"))
+        self.log_view.queue_log(level, message)
 
     def process_log_queue(self):
-        try:
-            while True:
-                level, text = self._log_queue.get_nowait()
-                tag = f"lvl_{level}"
-                color_map = {
-                    "INFO": "#d0d0d0",
-                    "SUCCESS": "#44dd55",
-                    "WARN": "#ffcc00",
-                    "ERROR": "#ff4444",
-                }
-                try:
-                    if not self.console_output.tag_cget(tag, "foreground"):
-                        self.console_output.tag_config(tag, foreground=color_map.get(level, "#d0d0d0"))
-                except Exception:
-                    self.console_output.tag_config(tag, foreground=color_map.get(level, "#d0d0d0"))
-
-                self.console_output.configure(state="normal")
-                self.console_output.insert("end", text, tag)
-                if self._log_autoscroll:
-                    self.console_output.see("end")
-                self.console_output.configure(state="disabled")
-        except queue.Empty:
-            pass
-
-        self.after(50, self.process_log_queue)
+        self.log_view.process_log_queue()
 
     def _append_log_text(self, text: str):
-        self.console_output.configure(state="normal")
-        self.console_output.insert("end", text)
-        if self._log_autoscroll:
-            self.console_output.see("end")
-        self.console_output.configure(state="disabled")
+        self.log_view.append_log_text(text)
 
     def _show_upload_progress(self, label: str, fraction: float = 0.0):
         try:
@@ -843,25 +815,13 @@ class SaveFinderApp(ctk.CTk):
 
     # -------- results UI --------
     def _clear_results(self):
-        for w in getattr(self, "_tree_sections", []):
-            try:
-                w.destroy()
-            except Exception:
-                pass
-        self._tree_sections = []
+        self.results_view.clear_results()
 
     def _show_results_for_paths(self, paths: list[str]):
-        self.discovered_paths = list(dict.fromkeys([p for p in (paths or []) if p]))
-        self._clear_results()
-        for p in self.discovered_paths:
-            self._add_result_section(p)
-        self._update_auto_backup_checkbox_visibility()
+        self.results_view.show_results_for_paths(paths)
 
     def _show_empty_results(self):
-        self.discovered_paths = []
-        self._clear_results()
-        self._update_auto_backup_checkbox_visibility()
-        self._append_log_text("\n[INFO] No saved locations available for this profile yet.\n")
+        self.results_view.show_empty_results()
 
     def _update_auto_backup_checkbox_visibility(self):
         # Auto-backup now watches all profiles independently of what's
@@ -876,120 +836,13 @@ class SaveFinderApp(ctk.CTk):
             pass
 
     def _toggle_results_visibility(self):
-        self.results_visible = not getattr(self, "results_visible", True)
-        if self.results_visible:
-            self.results_scroll.pack(fill="both", expand=True, padx=10, pady=10)
-            self.results_toggle_btn.configure(text="Hide Results")
-        else:
-            self.results_scroll.forget()
-            self.results_toggle_btn.configure(text="Show Results")
-
-    def _copy_path(self, path: str):
-        try:
-            self.clipboard_clear()
-            self.clipboard_append(path)
-        except Exception:
-            pass
+        self.results_view.toggle_visibility()
 
     def _open_in_explorer(self, path: str):
         try:
             subprocess.Popen(["explorer", path])
         except Exception:
             pass
-
-    def _add_result_section(self, root_path: str):
-        section = ctk.CTkFrame(self.results_scroll, fg_color="transparent")
-        section.pack(fill="x", pady=6)
-
-        header = ctk.CTkFrame(section, fg_color="transparent")
-        header.pack(fill="x")
-        header.grid_columnconfigure(1, weight=1)
-
-        expander_state = {"expanded": False}
-        children_frame = ctk.CTkFrame(section, fg_color="transparent")
-        children_frame.pack(fill="x")
-        children_frame.forget()
-
-        def toggle():
-            if expander_state["expanded"]:
-                children_frame.forget()
-                expander_state["expanded"] = False
-            else:
-                self._populate_children(children_frame, root_path)
-                children_frame.pack(fill="x", pady=(4, 0))
-                expander_state["expanded"] = True
-
-        exp_btn = ctk.CTkButton(
-            header,
-            text="▶",
-            width=28,
-            command=lambda: (toggle(), exp_btn.configure(text="▼" if not expander_state["expanded"] else "▶")),
-        )
-        exp_btn.grid(row=0, column=0, padx=(8, 4), pady=4)
-
-        root_label = ctk.CTkLabel(header, text=root_path, anchor="w", font=ctk.CTkFont(size=12))
-        root_label.grid(row=0, column=1, sticky="w", padx=(0, 8), pady=4)
-
-        try:
-            root_label.bind("<Double-Button-1>", lambda e, p=root_path: self._on_label_double_click_restore(p))
-        except Exception:
-            pass
-
-        restore_btn = ctk.CTkButton(header, text="Restore", width=80, command=lambda p=root_path: self.start_restore(p))
-        restore_btn.grid(row=0, column=5, padx=(6, 8))
-
-        backup_btn = ctk.CTkButton(header, text="Backup", width=80, command=lambda p=root_path: self.start_backup(p))
-        backup_btn.grid(row=0, column=4, padx=(6, 6))
-
-        open_btn = ctk.CTkButton(header, text="Open", width=64, command=lambda p=root_path: self._open_in_explorer(p))
-        open_btn.grid(row=0, column=3, padx=(6, 6))
-
-        copy_btn = ctk.CTkButton(header, text="Copy", width=64, command=lambda p=root_path: self._copy_path(p))
-        copy_btn.grid(row=0, column=2, padx=(6, 6))
-
-        self._tree_sections.append(section)
-
-    def _populate_children(self, children_frame, root_path: str, max_items: int = 200):
-        for w in getattr(children_frame, "winfo_children", lambda: [])():
-            try:
-                w.destroy()
-            except Exception:
-                pass
-
-        try:
-            entries = os.listdir(root_path)
-        except Exception:
-            entries = []
-
-        subfolders = [os.path.join(root_path, e) for e in entries if os.path.isdir(os.path.join(root_path, e))]
-        subfolders.sort(key=lambda x: x.lower())
-        if len(subfolders) > max_items:
-            subfolders = subfolders[:max_items]
-
-        if not subfolders:
-            empty = ctk.CTkLabel(children_frame, text="(no subfolders)", anchor="w", font=ctk.CTkFont(size=11), text_color="gray")
-            empty.pack(fill="x", padx=30, pady=(4, 6))
-            return
-
-        for sp in subfolders:
-            row = ctk.CTkFrame(children_frame, fg_color="transparent")
-            row.pack(fill="x", padx=(18, 8), pady=2)
-
-            name = os.path.basename(sp)
-            lbl = ctk.CTkLabel(row, text=name, anchor="w", font=ctk.CTkFont(size=11))
-            lbl.pack(side="left", fill="x", expand=True, padx=(10, 10))
-
-            cbtn = ctk.CTkButton(row, text="Copy", width=52, command=lambda p=sp: self._copy_path(p))
-            cbtn.pack(side="right", padx=(0, 6))
-
-            obtn = ctk.CTkButton(row, text="Open", width=52, command=lambda p=sp: self._open_in_explorer(p))
-            obtn.pack(side="right", padx=(0, 6))
-
-            backup_btn = ctk.CTkButton(row, text="Backup", width=70, command=lambda p=sp: self.start_backup(p))
-            backup_btn.pack(side="right", padx=(0, 6))
-
-            restore_btn = ctk.CTkButton(row, text="Restore", width=70, command=lambda p=sp: self.start_restore(p))
-            restore_btn.pack(side="right", padx=(0, 6))
 
     # -------- backend selection --------
     def _ensure_drive_available_or_log(self) -> bool:
@@ -1007,6 +860,14 @@ class SaveFinderApp(ctk.CTk):
             script_dir=os.path.dirname(os.path.abspath(__file__)),
         )
         self.refresh_profiles_ui()
+
+        # Auto-backup targets were resolved against the old backend — clear
+        # them immediately so nothing gets written under stale names while
+        # a fresh scan against the new backend runs, instead of waiting up
+        # to _auto_backup_targets_refresh_ms for the next scheduled scan.
+        self._auto_backup_targets = {}
+        if self._auto_backup_enabled:
+            self._spawn_auto_backup_targets_scan()
 
     def _on_auto_backup_toggled(self):
         self._auto_backup_enabled = bool(self.auto_backup_var.get())
@@ -1059,13 +920,20 @@ class SaveFinderApp(ctk.CTk):
 
     # -------- auto backup --------
     def _reset_auto_backup_state(self):
-        self._auto_backup_state = {}
-        for path in list(self.discovered_paths):
-            if os.path.isdir(path):
-                self._auto_backup_state[path] = {
-                    "latest_mtime": self._get_directory_latest_mtime(path),
-                    "hash": compute_directory_tree_hash(path) if os.path.isdir(path) else None,
-                }
+        # compute_directory_tree_hash reads every file in each discovered
+        # path — do this in a background thread so toggling auto-backup on
+        # doesn't freeze the UI while hashing large save folders.
+        def _worker():
+            state = {}
+            for path in list(self.discovered_paths):
+                if os.path.isdir(path):
+                    state[path] = {
+                        "latest_mtime": self._get_directory_latest_mtime(path),
+                        "hash": compute_directory_tree_hash(path),
+                    }
+            self._auto_backup_state = state
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _get_directory_latest_mtime(self, root_path: str) -> float:
         latest = 0.0
@@ -1250,12 +1118,9 @@ class SaveFinderApp(ctk.CTk):
 
     def on_scan_complete(self, paths):
         def _apply_ui():
-            self.discovered_paths = paths or []
             self.scan_btn.configure(state="normal", text="Scan for Saves")
 
-            self._clear_results()
-            for p in self.discovered_paths:
-                self._add_result_section(p)
+            self._show_results_for_paths(paths)
 
             if self.discovered_paths:
                 self._append_log_text("\n[READY] Scan finished. Save locations verified and locked.\n")

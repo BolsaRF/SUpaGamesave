@@ -39,6 +39,11 @@ def compute_directory_tree_hash(root_path: str, chunk_size: int = 1024 * 1024) -
             rel_fp = rel_fp.replace("\\", "/")
             h.update(rel_fp.encode("utf-8"))
             h.update(b"\0")
+            # Length-prefix the content so a crafted file's trailing bytes
+            # can't be mistaken for the next entry's name+terminator (two
+            # genuinely different trees could otherwise hash identically).
+            h.update(str(os.path.getsize(abs_fp)).encode("utf-8"))
+            h.update(b"\0")
             with open(abs_fp, "rb") as f:
                 while True:
                     chunk = f.read(chunk_size)

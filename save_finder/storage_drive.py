@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -55,6 +56,12 @@ def _debug_mark(message: str, log_callback=None):
 
 
 def _get_script_dir() -> str:
+    # When frozen (PyInstaller), compiled modules live under an internal
+    # module folder, not next to the produced .exe — resolve relative to
+    # the executable itself so credentials/token are found where a user
+    # would naturally place them (and where --add-data drops them).
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
     # Matches gui_app.py's own settings-path computation: same directory as
     # this package (save_finder/), which is where credentials/token actually live.
     return os.path.dirname(os.path.abspath(__file__))
@@ -254,21 +261,22 @@ def drive_upload_backup_zip(
     request = service.files().create(body=file_metadata, media_body=media, fields="id")
     response = None
 
-    with open(zip_path, "rb") as f:
-        total_size = os.path.getsize(zip_path)
-        uploaded_bytes = 0
-        while response is None:
-            status, response = request.next_chunk(num_retries=3)
-            if status is not None:
-                uploaded_bytes = int(status.resumable_progress or 0)
-                percent = uploaded_bytes / total_size if total_size > 0 else 0.0
-                if log_callback:
-                    log_callback(f"[DRIVE] Upload progress: {percent * 100:.1f}%\n")
-                try:
-                    if progress_callback:
-                        progress_callback("Uploading backup to Drive...", percent)
-                except Exception:
-                    pass
+    # MediaFileUpload already manages its own file handle for reading
+    # chunks — no need to hold zip_path open here too.
+    total_size = os.path.getsize(zip_path)
+    uploaded_bytes = 0
+    while response is None:
+        status, response = request.next_chunk(num_retries=3)
+        if status is not None:
+            uploaded_bytes = int(status.resumable_progress or 0)
+            percent = uploaded_bytes / total_size if total_size > 0 else 0.0
+            if log_callback:
+                log_callback(f"[DRIVE] Upload progress: {percent * 100:.1f}%\n")
+            try:
+                if progress_callback:
+                    progress_callback("Uploading backup to Drive...", percent)
+            except Exception:
+                pass
 
     fid = response.get("id")
     if log_callback:
@@ -287,12 +295,15 @@ def drive_cleanup_old_backups(
         return
 
     try:
+        # Cleanup needs to see every backup for this save_root, not just the
+        # UI-display-sized page, or backups beyond the limit could never be
+        # cleaned up.
         backups = drive_list_profile_backups(
             service,
             profile_folder_id,
             save_root=save_root,
             log_callback=log_callback,
-            limit=200,
+            limit=2000,
         )
         for backup in backups:
             fid = str(backup.get("id", ""))

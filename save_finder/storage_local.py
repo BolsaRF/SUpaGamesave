@@ -32,7 +32,7 @@ def localfs_backups_root(default_root: str | None = None, script_dir: str | None
     return root
 
 
-def list_profiles(backups_root: str):
+def list_profiles(backups_root: str, log_callback=None):
     _safe_makedirs(backups_root)
     items = []
     try:
@@ -40,8 +40,9 @@ def list_profiles(backups_root: str):
             p = os.path.join(backups_root, name)
             if os.path.isdir(p):
                 items.append({"id": p, "name": name})
-    except Exception:
-        pass
+    except Exception as e:
+        if log_callback:
+            log_callback(f"[LOCAL] Failed to list profiles in {backups_root}: {e}\n")
     return items
 
 
@@ -77,8 +78,9 @@ def list_profile_backups(profile_folder_path: str, save_root: str | None = None,
                     "modifiedTime": datetime.utcfromtimestamp(mtime).isoformat() + "Z",
                 }
             )
-    except Exception:
-        pass
+    except Exception as e:
+        if log_callback:
+            log_callback(f"[LOCAL] Failed to list backups in {profile_folder_path}: {e}\n")
 
     out.sort(key=lambda x: x.get("modifiedTime", ""), reverse=True)
     return out[:limit]
@@ -118,7 +120,10 @@ def cleanup_old_backups(profile_folder_path: str, save_root: str, keep_path: str
     if not save_root:
         return
     try:
-        backups = list_profile_backups(profile_folder_path, save_root=save_root, log_callback=log_callback, limit=200)
+        # Cleanup needs to see every backup for this save_root, not just the
+        # UI-display-sized page, or backups beyond the limit could never be
+        # cleaned up.
+        backups = list_profile_backups(profile_folder_path, save_root=save_root, log_callback=log_callback, limit=2000)
         for backup in backups:
             path = str(backup.get("id", ""))
             if not path or path == keep_path:
