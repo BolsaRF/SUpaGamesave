@@ -1102,6 +1102,15 @@ class SaveFinderApp(ctk.CTk):
     def _detected_save_root_name(self, root_path: str) -> str:
         return os.path.basename(os.path.normpath(root_path))
 
+    # Whole-folder-name matches (not just suffixes) that are generic
+    # save-data containers, not the game's own name — e.g. Unity's
+    # "<Game>_Data" sibling folder, or common save-subfolder conventions.
+    _GENERIC_SAVE_CONTAINER_NAMES = {
+        "save", "saves", "savefile", "savefiles", "save data", "savedata",
+        "savegame", "savegames", "saved games", "savedgames", "remote",
+        "storage", "userdata", "cloud", "cloudsaves", "cloud saves", "data",
+    }
+
     def _derive_profile_name_from_path(self, path: str | None) -> str | None:
         candidate = (path or "").strip()
         if not candidate:
@@ -1111,23 +1120,32 @@ class SaveFinderApp(ctk.CTk):
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if cleaned:
             cleaned = re.sub(
-                r"(?i)\s*[-_.]?(v\d+(?:\.\d+)*|build|update|patch|p2p|repack|cracked|steam|epic|gog|demo)(?:[-_.]?\w+)?$",
+                r"(?i)\s*[-_.]?(v\d+(?:\.\d+)*|build|update|patch|p2p|repack|cracked|steam|epic|gog|demo|data)(?:[-_.]?\w+)?$",
                 "",
                 cleaned,
             ).strip()
             cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._- ")
+        if cleaned and cleaned.lower() in self._GENERIC_SAVE_CONTAINER_NAMES:
+            return None
         return cleaned or None
 
-    def _match_existing_profile_name(self, name: str) -> str:
-        """If a profile with this name (case-insensitive) is already in the
-        sidebar, return its exact existing name instead of a fresh guess.
+    @staticmethod
+    def _normalize_profile_name_for_match(name: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", name.lower())
 
-        Prevents near-duplicate profiles (e.g. "octopath traveler 0" vs an
-        existing "Octopath Traveler 0") since Drive folder names are
+    def _match_existing_profile_name(self, name: str) -> str:
+        """If a profile with this name is already in the sidebar, return its
+        exact existing name instead of a fresh guess. The comparison ignores
+        case and punctuation/spacing (e.g. "octopath traveler 0" vs
+        "Octopath.Traveler.0" both match), since folder-name-derived guesses
+        rarely match a hand-typed profile name character-for-character.
+
+        Also prevents near-duplicate profiles, since Drive folder names are
         case-sensitive even though this comparison isn't.
         """
+        target = self._normalize_profile_name_for_match(name)
         for existing in getattr(self, "_known_profile_names", []) or []:
-            if existing.strip().lower() == name.strip().lower():
+            if self._normalize_profile_name_for_match(existing) == target:
                 return existing
         return name
 
