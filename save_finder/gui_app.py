@@ -975,6 +975,15 @@ class SaveFinderApp(ctk.CTk):
                     self._auto_backup_state[path] = {"latest_mtime": latest_mtime, "hash": current_hash}
                     self._auto_backup_in_progress.add(path)
 
+                    # Every watched path came from an existing profile
+                    # (built by build_auto_backup_targets), so its profile
+                    # name is already known — no guessing needed.
+                    profile_name = self._auto_backup_targets.get(path) or self._default_backup_profile_name(path)
+                    self._queue_log(
+                        "INFO",
+                        f"[AUTO-BACKUP] Change detected in '{path}' (profile: {profile_name}) — uploading...\n",
+                    )
+
                     def log_worker(message: str):
                         msg = (message or "").strip()
                         upper = msg.upper()
@@ -986,11 +995,6 @@ class SaveFinderApp(ctk.CTk):
                         elif "WARN" in upper:
                             level = "WARN"
                         self._queue_log(level, message)
-
-                    # Every watched path came from an existing profile
-                    # (built by build_auto_backup_targets), so its profile
-                    # name is already known — no guessing needed.
-                    profile_name = self._auto_backup_targets.get(path) or self._default_backup_profile_name(path)
 
                     threading.Thread(
                         target=self._auto_backup_worker,
