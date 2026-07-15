@@ -29,30 +29,26 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import simpledialog, messagebox
 
-try:
-    # When executed as part of the `save_finder` package
-    from .gui.log_view import LogView
-    from .gui.results_view import ResultsView, ResultsCallbacks
-    from .gui.profiles_view import ProfilesView, ProfilesCallbacks, _pick_newest_by_modifiedTime
-except ImportError:  # pragma: no cover
-    # When executed directly (e.g., `python save_finder/gui_app.py`)
-    LogView = None  # type: ignore
-    ResultsView = None  # type: ignore
-    ResultsCallbacks = None  # type: ignore
-    ProfilesView = None  # type: ignore
-    ProfilesCallbacks = None  # type: ignore
-    _pick_newest_by_modifiedTime = None  # type: ignore
-
-
-
 # ---- Import extracted backends/utilities (new package) ----
 
-# Allow running this file directly (python save_finder/gui_app.py)
+# Allow running this file directly (python save_finder/gui_app.py), and —
+# critically — allow it to work when PyInstaller freezes this file as the
+# entry script, which also runs it with __package__ unset (not via runpy,
+# so relative imports below need this same fallback to resolve).
 if __package__ is None or __package__ == "":
     # Add project root to sys.path so `import save_finder` works
     _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if _PROJECT_ROOT not in sys.path:
         sys.path.insert(0, _PROJECT_ROOT)
+
+if __package__ is None or __package__ == "":
+    from save_finder.gui.log_view import LogView
+    from save_finder.gui.results_view import ResultsView, ResultsCallbacks
+    from save_finder.gui.profiles_view import ProfilesView, ProfilesCallbacks, _pick_newest_by_modifiedTime
+else:
+    from .gui.log_view import LogView
+    from .gui.results_view import ResultsView, ResultsCallbacks
+    from .gui.profiles_view import ProfilesView, ProfilesCallbacks, _pick_newest_by_modifiedTime
 
 from save_finder.app_config import (
 
