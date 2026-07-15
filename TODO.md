@@ -1,10 +1,8 @@
-# TODO - UI improvements
+# TODO
 
-## Plan (from earlier)
-- [ ] Review current GUI log mechanism in `save_finder.py`.
-- [ ] Add thread-safe logging using a queue + `after()`.
-- [ ] Improve log UX: timestamps + severity tags/colors + Clear + Auto-scroll toggle.
-- [ ] Add interactive Results panel: list of save paths + Copy + Open in Explorer.
-- [ ] Hook scan completion to populate results panel.
-- [ ] Smoke test manually.
+- [ ] Add Drive profile-loading progress indicators (logs + existing progress bar)
+  - [ ] Show progress bar when `refresh_profiles_ui()` runs with Drive backend
+  - [ ] Update progress by phases: Connecting → Fetching app folder → Fetching profiles → Counting backups → Rendering UI
+  - [ ] Hide progress bar when finished or on error
+  - [ ] Ensure UI updates via Tk `after()` and does not break existing upload progress
 

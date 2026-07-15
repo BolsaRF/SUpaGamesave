@@ -1,0 +1,232 @@
+[2026-07-10T17:09:33.190386] __main__: starting
+[2026-07-10T17:09:33.358670] SaveFinderApp.__init__ start
+[2026-07-10T17:09:33.741645] __main__: SaveFinderApp created
+[2026-07-10T17:17:32.009641] __main__: starting
+[2026-07-10T17:17:32.231035] SaveFinderApp.__init__ start
+[2026-07-10T17:17:32.548777] __main__: SaveFinderApp created
+[2026-07-10T17:17:32.589713] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.606619] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.620119] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.640012] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.657592] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.673095] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.691514] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.704730] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.717919] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.732434] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.746319] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.762917] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.773711] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.786702] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.796977] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.810107] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.824047] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.840146] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.851217] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.863994] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.899592] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.913087] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.926823] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.938908] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.952252] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.965060] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.981394] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:32.999233] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.012266] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.029597] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.040045] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.055724] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.074531] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.087058] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.102165] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.118717] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.137429] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.148753] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.167614] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.179009] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.189676] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.200798] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.211766] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.224032] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.235322] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.247244] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.263485] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.273595] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.283239] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.296022] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.309855] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.322589] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.333835] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.343384] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.354236] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.367991] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.379639] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.391853] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.402651] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.414112] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.425767] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.435111] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.445370] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.454915] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.465877] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.476242] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.488835] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.503567] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.515407] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.526405] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.537408] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.548980] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.561227] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.572513] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.584775] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.594216] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.603709] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.613145] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.623570] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.634425] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.648470] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.657370] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.667171] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.676025] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.685858] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.694184] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.704403] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.712342] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.723456] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.730904] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.738618] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.746968] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.774993] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.794897] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.803870] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.814403] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.825398] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.835073] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:17:33.845214] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.094695] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.111495] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.127129] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.142566] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.158137] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.177796] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.191433] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.203661] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.216324] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.236306] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.247586] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.259976] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.272348] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.284185] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.301173] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.318612] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.334000] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.348854] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.364431] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.378803] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.392038] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.403615] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.415269] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.426823] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.439661] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.451400] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.462444] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.473910] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.489121] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.502096] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.513130] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.523680] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.533840] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.543946] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.554199] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.563907] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.572747] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.583759] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.595970] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.605813] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.616740] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.647220] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.713014] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.723355] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.733804] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.744606] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.756146] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.765397] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.786284] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.800373] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.814388] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.826829] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.842676] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.862397] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:12.880623] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.076954] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.094025] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.112086] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.126687] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.144519] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.159044] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.176363] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.190960] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.207401] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.225544] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.254407] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.270355] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.294499] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.371642] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.382141] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:18:13.397250] _on_map_event: window mapped -> stop_tray
+[2026-07-10T17:39:48.250557] __main__: starting
+[2026-07-10T17:39:48.459303] SaveFinderApp.__init__ start
+[2026-07-10T17:39:48.633055] __main__: SaveFinderApp created
+[2026-07-10T17:39:49.626498] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T17:39:49.631510] _watch_window_state: detected restore -> stop_tray
+[2026-07-10T17:40:27.856305] _watch_window_state: state changed normal -> withdrawn
+[2026-07-10T17:42:13.368177] __main__: starting
+[2026-07-10T17:42:13.460726] SaveFinderApp.__init__ start
+[2026-07-10T17:42:13.626303] __main__: SaveFinderApp created
+[2026-07-10T17:42:14.624875] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T17:42:14.629894] _watch_window_state: detected restore -> stop_tray
+[2026-07-10T17:42:15.636639] _watch_window_state: state changed normal -> iconic
+[2026-07-10T17:42:15.641822] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-10T17:42:16.661279] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-10T17:50:27.286247] __main__: starting
+[2026-07-10T17:50:27.401083] SaveFinderApp.__init__ start
+[2026-07-10T17:50:27.574167] __main__: SaveFinderApp created
+[2026-07-10T17:50:28.568826] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T17:50:28.573829] _watch_window_state: detected restore -> stop_tray
+[2026-07-10T17:50:42.651938] _watch_window_state: state changed normal -> iconic
+[2026-07-10T17:50:42.659748] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-10T17:50:43.667277] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-10T17:56:30.816849] __main__: starting
+[2026-07-10T17:56:30.938668] SaveFinderApp.__init__ start
+[2026-07-10T17:56:31.124879] __main__: SaveFinderApp created
+[2026-07-10T17:56:32.125479] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T17:56:32.130230] _watch_window_state: detected restore -> stop_tray
+[2026-07-10T18:55:59.348181] __main__: starting
+[2026-07-10T18:55:59.576173] SaveFinderApp.__init__ start
+[2026-07-10T18:55:59.826549] __main__: SaveFinderApp created
+[2026-07-10T18:56:00.821948] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T18:56:00.864298] _watch_window_state: detected restore -> stop_tray
+[2026-07-10T18:56:33.038402] _watch_window_state: state changed normal -> iconic
+[2026-07-10T18:56:33.044230] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-10T18:56:34.058299] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-10T18:57:27.533052] __main__: starting
+[2026-07-10T18:57:27.613895] SaveFinderApp.__init__ start
+[2026-07-10T18:57:27.764528] __main__: SaveFinderApp created
+[2026-07-10T18:57:28.760549] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T18:57:28.834150] _watch_window_state: detected restore -> stop_tray
+[2026-07-10T18:59:56.697152] _watch_window_state: state changed normal -> iconic
+[2026-07-10T18:59:56.706451] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-10T18:59:57.727066] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-10T20:06:18.550395] __main__: starting
+[2026-07-10T20:06:19.037301] SaveFinderApp.__init__ start
+[2026-07-10T20:06:20.136095] __main__: SaveFinderApp created
+[2026-07-10T20:06:21.109940] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T20:06:21.120215] _watch_window_state: detected restore -> stop_tray
+[2026-07-10T20:09:00.503960] _watch_window_state: state changed normal -> iconic
+[2026-07-10T20:09:00.516458] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-10T20:09:02.035616] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-10T20:23:47.131706] __main__: starting
+[2026-07-10T20:23:47.435614] SaveFinderApp.__init__ start
+[2026-07-10T20:23:47.749557] __main__: SaveFinderApp created
+[2026-07-10T20:23:48.747715] _watch_window_state: state changed withdrawn -> normal
+[2026-07-10T20:23:48.755080] _watch_window_state: detected restore -> stop_tray

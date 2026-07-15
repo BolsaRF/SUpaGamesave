@@ -1,0 +1,88 @@
+[2026-07-11T12:20:23.418188] __main__: starting
+[2026-07-11T12:20:23.766462] SaveFinderApp.__init__ start
+[2026-07-11T12:20:23.981336] __main__: SaveFinderApp created
+[2026-07-11T12:20:24.975438] _watch_window_state: state changed withdrawn -> normal
+[2026-07-11T12:20:24.980751] _watch_window_state: detected restore -> stop_tray
+[2026-07-11T12:20:51.196106] _watch_window_state: state changed normal -> iconic
+[2026-07-11T12:20:51.201362] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-11T12:20:51.207369] _start_tray: starting
+[2026-07-11T12:20:51.251079] _create_tray_icon: enter
+[2026-07-11T12:20:51.400877] _create_tray_icon: image ready
+[2026-07-11T12:20:51.405775] _create_tray_icon: icon created
+[2026-07-11T12:20:51.411099] _start_tray: icon.run starting
+[2026-07-11T12:20:51.416278] _start_tray: thread started
+[2026-07-11T12:20:52.431477] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-12T10:05:40.862437] __main__: starting
+[2026-07-12T10:05:41.673151] SaveFinderApp.__init__ start
+[2026-07-12T10:05:41.873845] __main__: SaveFinderApp created
+[2026-07-12T10:05:42.869266] _watch_window_state: state changed withdrawn -> normal
+[2026-07-12T10:05:42.874293] _watch_window_state: detected restore -> stop_tray
+[2026-07-12T10:28:12.426123] _watch_window_state: state changed normal -> iconic
+[2026-07-12T10:28:12.431810] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-12T10:28:12.437775] _start_tray: starting
+[2026-07-12T10:28:12.443760] _create_tray_icon: enter
+[2026-07-12T10:28:12.563675] _create_tray_icon: image ready
+[2026-07-12T10:28:12.569431] _create_tray_icon: icon created
+[2026-07-12T10:28:12.574483] _start_tray: thread started
+[2026-07-12T10:28:12.574548] _start_tray: icon.run starting
+[2026-07-12T10:28:13.593619] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-13T14:09:56.596541] __main__: starting
+[2026-07-13T14:09:57.281522] SaveFinderApp.__init__ start
+[2026-07-13T14:09:57.447534] __main__: SaveFinderApp created
+[2026-07-13T14:09:58.441786] _watch_window_state: state changed withdrawn -> normal
+[2026-07-13T14:09:58.447165] _watch_window_state: detected restore -> stop_tray
+[2026-07-13T14:11:41.028646] _watch_window_state: state changed normal -> iconic
+[2026-07-13T14:11:41.034617] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-13T14:11:41.045252] _start_tray: starting
+[2026-07-13T14:11:41.050942] _create_tray_icon: enter
+[2026-07-13T14:11:41.151049] _create_tray_icon: image ready
+[2026-07-13T14:11:41.156390] _create_tray_icon: icon created
+[2026-07-13T14:11:41.162507] _start_tray: icon.run starting
+[2026-07-13T14:11:41.162563] _start_tray: thread started
+[2026-07-13T14:11:42.180751] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-13T20:17:03.781918] _watch_window_state: state changed withdrawn -> normal
+[2026-07-13T20:17:03.799652] _watch_window_state: detected restore -> stop_tray
+[2026-07-13T20:17:03.813785] _start_tray: icon.run exited
+[2026-07-13T20:17:48.143135] __main__: starting
+[2026-07-13T20:17:48.626504] SaveFinderApp.__init__ start
+[2026-07-13T20:17:48.769036] __main__: SaveFinderApp created
+[2026-07-13T20:17:49.773074] _watch_window_state: state changed withdrawn -> normal
+[2026-07-13T20:17:49.778609] _watch_window_state: detected restore -> stop_tray
+[2026-07-13T20:18:32.165071] _watch_window_state: state changed normal -> iconic
+[2026-07-13T20:18:32.173070] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-13T20:18:32.178749] _start_tray: starting
+[2026-07-13T20:18:32.183658] _create_tray_icon: enter
+[2026-07-13T20:18:32.545706] _create_tray_icon: image ready
+[2026-07-13T20:18:32.551179] _create_tray_icon: icon created
+[2026-07-13T20:18:32.556567] _start_tray: icon.run starting
+[2026-07-13T20:18:32.556632] _start_tray: thread started
+[2026-07-13T20:18:33.571246] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-13T20:18:35.647258] _watch_window_state: state changed withdrawn -> normal
+[2026-07-13T20:18:35.798438] _watch_window_state: detected restore -> stop_tray
+[2026-07-13T20:18:35.809302] _start_tray: icon.run exited
+[2026-07-14T08:52:36.992327] __main__: starting
+[2026-07-14T08:52:37.686260] SaveFinderApp.__init__ start
+[2026-07-14T08:52:37.915637] __main__: SaveFinderApp created
+[2026-07-14T08:52:38.912576] _watch_window_state: state changed withdrawn -> normal
+[2026-07-14T08:52:38.917873] _watch_window_state: detected restore -> stop_tray
+[2026-07-14T10:14:18.112000] _watch_window_state: state changed normal -> iconic
+[2026-07-14T10:14:18.116977] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-14T10:14:18.122656] _start_tray: starting
+[2026-07-14T10:14:18.129511] _create_tray_icon: enter
+[2026-07-14T10:14:18.245425] _create_tray_icon: image ready
+[2026-07-14T10:14:18.250122] _create_tray_icon: icon created
+[2026-07-14T10:14:18.255059] _start_tray: icon.run starting
+[2026-07-14T10:14:18.255122] _start_tray: thread started
+[2026-07-14T10:14:19.266315] _watch_window_state: state changed iconic -> withdrawn
+[2026-07-14T10:14:31.705961] _watch_window_state: state changed withdrawn -> normal
+[2026-07-14T10:14:31.838829] _watch_window_state: detected restore -> stop_tray
+[2026-07-14T10:14:31.853926] _start_tray: icon.run exited
+[2026-07-14T10:15:08.396936] _watch_window_state: state changed normal -> iconic
+[2026-07-14T10:15:08.403188] _watch_window_state: detected iconic -> minimize_to_tray
+[2026-07-14T10:15:08.409978] _start_tray: starting
+[2026-07-14T10:15:08.415802] _create_tray_icon: enter
+[2026-07-14T10:15:08.421103] _create_tray_icon: image ready
+[2026-07-14T10:15:08.426986] _create_tray_icon: icon created
+[2026-07-14T10:15:08.433559] _start_tray: icon.run starting
+[2026-07-14T10:15:08.433608] _start_tray: thread started
+[2026-07-14T10:15:09.449388] _watch_window_state: state changed iconic -> withdrawn

@@ -13,6 +13,14 @@ import tempfile
 import shutil
 import hashlib
 import webbrowser
+import sys
+
+# Optional tray dependencies
+try:
+    import pystray  # type: ignore
+    from PIL import Image, ImageDraw  # type: ignore
+except Exception:
+    pystray = None
 
 import customtkinter as ctk
 from tkinter import filedialog
@@ -57,6 +65,7 @@ APP_SETTINGS_SELECTED_PROFILE = "selected_profile"
 APP_SETTINGS_STORAGE_BACKEND = "storage_backend"
 APP_SETTINGS_LOCAL_ROOT = "local_backups_root"
 APP_SETTINGS_AUTO_BACKUP = "auto_backup_enabled"
+APP_SETTINGS_START_AT_LOGIN = "start_at_login"
 
 # Filename format (required):
 #   <save_root>_<timestamp>__sha256_<sha12>.zip
@@ -68,12 +77,50 @@ def _drive_enabled() -> bool:
     return build is not None
 
 
+def _debug_mark(message: str):
+    try:
+        p = _get_script_dir()
+        f = os.path.join(p, "save_finder_debug.log")
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(f"[{datetime.now().isoformat()}] {message}\n")
+    except Exception:
+        pass
+
+
 def _get_script_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
 def _safe_makedirs(p: str):
     os.makedirs(p, exist_ok=True)
+
+
+def _set_start_at_login(enabled: bool) -> bool:
+    """Enable or disable start-at-login for current user (Windows HKCU Run).
+    Returns True if operation succeeded or not applicable on this platform."""
+    if os.name != "nt":
+        return False
+    try:
+        import winreg as reg
+        key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        app_name = "SaveFinder"
+        if enabled:
+            if getattr(sys, "frozen", False):
+                cmd = f'"{sys.executable}"'
+            else:
+                # Run Python with the script path
+                cmd = f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+            with reg.OpenKey(reg.HKEY_CURRENT_USER, key, 0, reg.KEY_SET_VALUE) as rk:
+                reg.SetValueEx(rk, app_name, 0, reg.REG_SZ, cmd)
+        else:
+            try:
+                with reg.OpenKey(reg.HKEY_CURRENT_USER, key, 0, reg.KEY_SET_VALUE) as rk:
+                    reg.DeleteValue(rk, app_name)
+            except FileNotFoundError:
+                pass
+        return True
+    except Exception:
+        return False
 
 
 def _compute_file_hash(path: str, chunk_size: int = 1024 * 1024) -> str:
@@ -504,6 +551,7 @@ def drive_upload_backup_zip(
     manifest: dict,
     sha256_hex: str,
     log_callback=None,
+    progress_callback=None,
 ) -> str:
     if not sha256_hex:
         raise RuntimeError("Missing sha256 for dedupe/naming")
@@ -525,8 +573,25 @@ def drive_upload_backup_zip(
     }
     media = MediaFileUpload(zip_path, mimetype=GOOGLE_DRIVE_ZIP_MIME, resumable=True)
 
-    created = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-    fid = created.get("id")
+    request = service.files().create(body=file_metadata, media_body=media, fields="id")
+    response = None
+    with open(zip_path, "rb") as f:
+        total_size = os.path.getsize(zip_path)
+        uploaded_bytes = 0
+        while response is None:
+            status, response = request.next_chunk(num_retries=3)
+            if status is not None:
+                uploaded_bytes = int(status.resumable_progress or 0)
+                percent = uploaded_bytes / total_size if total_size > 0 else 0.0
+                if log_callback:
+                    log_callback(f"[DRIVE] Upload progress: {percent * 100:.1f}%\n")
+                try:
+                    if progress_callback:
+                        # progress_callback expects (label, fraction)
+                        progress_callback("Uploading backup to Drive...", percent)
+                except Exception:
+                    pass
+    fid = response.get("id")
     if log_callback:
         log_callback(f"[DRIVE] Upload complete (id={fid})\n")
     return fid
@@ -885,6 +950,8 @@ class SaveFinderApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        _debug_mark("SaveFinderApp.__init__ start")
+
         self._log_queue = queue.Queue()
         self._log_autoscroll = True
 
@@ -950,9 +1017,9 @@ class SaveFinderApp(ctk.CTk):
         main_frame = ctk.CTkFrame(self)
         main_frame.pack(fill="both", expand=True, padx=30, pady=(5, 0))
 
-        main_frame.grid_rowconfigure(1, weight=1)
+        main_frame.grid_rowconfigure(4, weight=1)
         main_frame.grid_columnconfigure(0, weight=1, minsize=560)
-        main_frame.grid_columnconfigure(1, weight=0, minsize=520)
+        main_frame.grid_columnconfigure(1, weight=1, minsize=520)
 
         # Logs
         self.log_label = ctk.CTkLabel(main_frame, text="Console Log Output", font=ctk.CTkFont(size=14, weight="bold"))
@@ -978,9 +1045,22 @@ class SaveFinderApp(ctk.CTk):
         self.console_output.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=(0, 0), pady=(5, 10))
         self.console_output.configure(state="disabled")
 
+        self.upload_progress_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        self.upload_progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=(0, 0), pady=(0, 10))
+        self.upload_progress_label = ctk.CTkLabel(
+            self.upload_progress_frame,
+            text="",
+            text_color="gray",
+            font=ctk.CTkFont(size=11),
+        )
+        self.upload_progress_label.pack(anchor="w", padx=10, pady=(0, 4))
+        self.upload_progress_bar = ctk.CTkProgressBar(self.upload_progress_frame, width=1040)
+        self.upload_progress_bar.pack(fill="x", padx=10, pady=(0, 4))
+        self.upload_progress_frame.grid_remove()
+
         # Results panel (left)
         self.results_frame = ctk.CTkFrame(main_frame)
-        self.results_frame.grid(row=3, column=0, sticky="nsew", padx=(0, 10), pady=(0, 10))
+        self.results_frame.grid(row=4, column=0, sticky="nsew", padx=(0, 10), pady=(0, 10))
         self.results_frame.grid_rowconfigure(0, weight=0)
         self.results_frame.grid_rowconfigure(1, weight=1)
         self.results_frame.grid_columnconfigure(0, weight=1)
@@ -1000,7 +1080,7 @@ class SaveFinderApp(ctk.CTk):
 
         # Profiles panel (right)
         self.profiles_frame = ctk.CTkFrame(main_frame)
-        self.profiles_frame.grid(row=3, column=1, sticky="nsew", padx=(10, 0), pady=(0, 10))
+        self.profiles_frame.grid(row=4, column=1, sticky="nsew", padx=(10, 0), pady=(0, 10))
         self.profiles_frame.grid_rowconfigure(5, weight=1)
         self.profiles_frame.grid_columnconfigure(0, weight=1)
 
@@ -1045,6 +1125,17 @@ class SaveFinderApp(ctk.CTk):
         self.local_root_browse = ctk.CTkButton(self.profiles_controls, text="Browse", width=60, command=self._choose_local_root)
         self.local_root_browse.pack(side="left", padx=(4, 0))
 
+        # Start at login checkbox
+        self._start_at_login = self._load_app_setting(APP_SETTINGS_START_AT_LOGIN, "0") == "1"
+        self.start_at_login_var = ctk.BooleanVar(value=self._start_at_login)
+        self.start_at_login_checkbox = ctk.CTkCheckBox(
+            self.profiles_controls,
+            text="Start at login",
+            variable=self.start_at_login_var,
+            command=self._on_start_at_login_toggled,
+        )
+        self.start_at_login_checkbox.pack(side="left", padx=(8, 0))
+
         self.open_profile_folder_btn = ctk.CTkButton(self.profiles_controls, text="Open Profile Folder", width=140, command=self._open_selected_profile_folder)
         self.open_profile_folder_btn.pack(side="left", padx=(8, 0))
 
@@ -1079,7 +1170,31 @@ class SaveFinderApp(ctk.CTk):
         self.after(200, self.refresh_profiles_ui)
         self.after(5000, self._auto_backup_poll)
 
-        # Initialize drive availability hint
+        # Tray and close behavior
+        self._tray_icon = None
+        self._tray_thread = None
+        try:
+            self._last_window_state = self.state()
+            self.after(1000, self._watch_window_state)
+        except Exception:
+            self._last_window_state = None
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # auto minimize to tray when user minimizes the window
+        # The <Map>/<Unmap> event bindings can be noisy and fight with the polling
+        # mechanism below, causing event storms on some platforms. The polling
+        # is a more reliable way to handle this.
+        # self.bind('<Unmap>', self._on_unmap_event)
+        # self.bind('<Map>', self._on_map_event)
+        # state polling fallback for minimize/restore (some platforms/events are noisy)
+        # Ensure autorun state matches saved preference
+        try:
+            if getattr(self, "start_at_login_var", None) and bool(self.start_at_login_var.get()):
+                _set_start_at_login(True)
+        except Exception:
+            pass
+
         self._append_log_text("\n[READY] App started. Backup/Restore enabled when Drive deps are installed.\n")
 
     def _toggle_autoscroll(self):
@@ -1138,6 +1253,329 @@ class SaveFinderApp(ctk.CTk):
         if self._log_autoscroll:
             self.console_output.see("end")
         self.console_output.configure(state="disabled")
+
+    def _show_upload_progress(self, label: str, fraction: float = 0.0):
+        try:
+            self.upload_progress_label.configure(text=label or "Uploading backup...")
+            self.upload_progress_bar.set(max(0.0, min(1.0, fraction)))
+            if not getattr(self.upload_progress_frame, "_visible", False):
+                self.upload_progress_frame.grid()
+                self.upload_progress_frame._visible = True
+            # update tray tooltip if available
+            try:
+                if getattr(self, "_tray_icon", None):
+                    try:
+                        pct = int(max(0.0, min(1.0, fraction)) * 100)
+                        self._tray_icon.title = f"SaveFinder — {pct}% uploading"
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _update_upload_progress(self, label: str, fraction: float = 0.0):
+        self.after(0, lambda: self._show_upload_progress(label, fraction))
+
+    def _reset_upload_progress(self):
+        try:
+            self.upload_progress_bar.set(0.0)
+            self.upload_progress_label.configure(text="")
+            if getattr(self.upload_progress_frame, "_visible", False):
+                self.upload_progress_frame.grid_remove()
+                self.upload_progress_frame._visible = False
+        except Exception:
+            pass
+
+    # --- Tray / Background helpers ---
+    def _on_start_at_login_toggled(self):
+        enabled = bool(self.start_at_login_var.get())
+        self._save_app_setting(APP_SETTINGS_START_AT_LOGIN, "1" if enabled else "0")
+        ok = _set_start_at_login(enabled)
+        if not ok:
+            self._append_log_text(f"\n[WARN] Could not {'enable' if enabled else 'disable'} start-at-login (platform or permission issue).\n")
+        try:
+            self._update_tray_state()
+        except Exception:
+            pass
+
+    # --- Tray / Background helpers ---
+    def _on_start_at_login_toggled(self):
+        enabled = bool(self.start_at_login_var.get())
+        self._save_app_setting(APP_SETTINGS_START_AT_LOGIN, "1" if enabled else "0")
+        ok = _set_start_at_login(enabled)
+        if not ok:
+            self._append_log_text(f"\n[WARN] Could not {'enable' if enabled else 'disable'} start-at-login (platform or permission issue).\n")
+        try:
+            self._update_tray_state()
+        except Exception:
+            pass
+
+    def _create_tray_icon(self):
+        if pystray is None:
+            return None
+        _debug_mark("_create_tray_icon: enter")
+        # Try to load an external icon file first; if missing, generate and save one.
+        icon_path = os.path.join(_get_script_dir(), "tray_icon.png")
+        img = None
+        try:
+            if os.path.isfile(icon_path):
+                img = Image.open(icon_path).convert("RGBA")
+        except Exception:
+            img = None
+
+        if img is None:
+            # generate a nicer 64x64 icon and save it for packaging convenience
+            try:
+                img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(img)
+                # background circle
+                draw.ellipse((4, 4, 60, 60), fill=(30, 144, 255, 255))
+                # white inner circle
+                draw.ellipse((12, 12, 52, 52), fill=(255, 255, 255, 255))
+                # draw initials 'SF'
+                try:
+                    from PIL import ImageFont
+
+                    fnt = ImageFont.load_default()
+                    draw.text((18, 18), "SF", font=fnt, fill=(30, 144, 255, 255))
+                except Exception:
+                    # fallback: simple rectangles to suggest letters
+                    draw.rectangle((18, 18, 22, 44), fill=(30, 144, 255, 255))
+                    draw.rectangle((26, 18, 38, 24), fill=(30, 144, 255, 255))
+                    draw.rectangle((26, 30, 38, 36), fill=(30, 144, 255, 255))
+                try:
+                    img.save(icon_path)
+                except Exception:
+                    pass
+            except Exception:
+                # final fallback: tiny blank image
+                img = Image.new("RGBA", (64, 64), (30, 144, 255, 255))
+
+        _debug_mark("_create_tray_icon: image ready")
+
+        def on_open(icon, item):
+            try:
+                self.after(0, lambda: (self.deiconify(), self.lift()))
+            except Exception:
+                pass
+
+        def on_quit(icon, item):
+            try:
+                icon.stop()
+            except Exception:
+                pass
+            try:
+                self.after(0, lambda: self.destroy())
+            except Exception:
+                pass
+
+        def tray_toggle_auto(icon, item):
+            try:
+                def _do():
+                    cur = bool(self.auto_backup_var.get())
+                    self.auto_backup_var.set(not cur)
+                    try:
+                        self._on_auto_backup_toggled()
+                    except Exception:
+                        pass
+                self.after(0, _do)
+            except Exception:
+                pass
+
+        def tray_toggle_start(icon, item):
+            try:
+                def _do():
+                    cur = bool(self.start_at_login_var.get())
+                    self.start_at_login_var.set(not cur)
+                    try:
+                        self._on_start_at_login_toggled()
+                    except Exception:
+                        pass
+                self.after(0, _do)
+            except Exception:
+                pass
+
+        def tray_toggle_start(icon, item):
+            try:
+                def _do():
+                    cur = bool(self.start_at_login_var.get())
+                    self.start_at_login_var.set(not cur)
+                    try:
+                        self._on_start_at_login_toggled()
+                    except Exception:
+                        pass
+                self.after(0, _do)
+            except Exception:
+                pass
+
+        def tray_status(icon, item):
+            try:
+                def _show():
+                    backend = getattr(self, "storage_backend_var", None)
+                    backend_val = backend.get() if backend else getattr(self, "storage_backend", "unknown")
+                    selected = getattr(self, "selected_profile_name", None) or "<none>"
+                    autos = "On" if bool(self.auto_backup_var.get()) else "Off"
+                    startup = "On" if bool(self.start_at_login_var.get()) else "Off"
+                    messagebox.showinfo("SaveFinder Status", f"Profile: {selected}\nStorage: {backend_val}\nAuto backup: {autos}\nStart at login: {startup}")
+                self.after(0, _show)
+            except Exception:
+                pass
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Open", on_open),
+            pystray.MenuItem("Auto backup", tray_toggle_auto, checked=lambda item: bool(self.auto_backup_var.get())),
+            pystray.MenuItem("Start at login", tray_toggle_start, checked=lambda item: bool(self.start_at_login_var.get())),
+            pystray.MenuItem("Status", tray_status),
+            pystray.MenuItem("Exit", on_quit),
+        )
+        try:
+            icon = pystray.Icon("SaveFinder", img, "SaveFinder", menu)
+            _debug_mark("_create_tray_icon: icon created")
+            return icon
+        except Exception as e:
+            _debug_mark(f"_create_tray_icon: icon creation failed: {e}")
+            return None
+
+    def _start_tray(self):
+        if pystray is None:
+            self._append_log_text("\n[WARN] Tray not available (pystray missing).\n")
+            return
+        if getattr(self, "_tray_icon", None) is not None:
+            return
+        try:
+            _debug_mark("_start_tray: starting")
+            self._tray_icon = self._create_tray_icon()
+            if self._tray_icon:
+                def _run_icon():
+                    try:
+                        _debug_mark("_start_tray: icon.run starting")
+                        self._tray_icon.run()
+                        _debug_mark("_start_tray: icon.run exited")
+                    except Exception as e:
+                        _debug_mark(f"_start_tray: icon.run exception: {e}")
+
+                self._tray_thread = threading.Thread(target=_run_icon, daemon=True)
+                self._tray_thread.start()
+                _debug_mark("_start_tray: thread started")
+        except Exception as e:
+            _debug_mark(f"_start_tray: exception {e}")
+
+    def _update_tray_state(self):
+        try:
+            if getattr(self, "_tray_icon", None):
+                title_parts = ["SaveFinder"]
+                try:
+                    if bool(self.auto_backup_var.get()):
+                        title_parts.append("Auto:On")
+                    else:
+                        title_parts.append("Auto:Off")
+                except Exception:
+                    pass
+                try:
+                    if bool(self.start_at_login_var.get()):
+                        title_parts.append("StartAtLogin:On")
+                    else:
+                        title_parts.append("StartAtLogin:Off")
+                except Exception:
+                    pass
+                try:
+                    if bool(self.start_at_login_var.get()):
+                        title_parts.append("StartAtLogin:On")
+                    else:
+                        title_parts.append("StartAtLogin:Off")
+                except Exception:
+                    pass
+                self._tray_icon.title = " — ".join(title_parts)
+        except Exception:
+            pass
+
+
+
+    def _stop_tray(self):
+        try:
+            if getattr(self, "_tray_icon", None):
+                try:
+                    self._tray_icon.stop()
+                except Exception:
+                    pass
+                self._tray_icon = None
+            self._tray_thread = None
+        except Exception:
+            pass
+
+    def _minimize_to_tray(self):
+        try:
+            self.withdraw()
+            self._start_tray()
+            self._append_log_text("\n[INFO] App minimized to tray.\n")
+        except Exception as e:
+            self._append_log_text(f"\n[ERROR] Minimize to tray failed: {e}\n")
+
+    def _on_close(self):
+        try:
+            resp = messagebox.askyesno(
+                "Exit SaveFinder",
+                "Leave the app running in background (minimize to tray)?\nClick Yes to keep running in background, No to exit completely.",
+            )
+            if resp:
+                # minimize to tray
+                self._minimize_to_tray()
+            else:
+                try:
+                    self._stop_tray()
+                except Exception:
+                    pass
+                self.destroy()
+        except Exception:
+            try:
+                self.destroy()
+            except Exception:
+                pass
+
+    # Tk event handlers
+    def _on_unmap_event(self, event=None):
+        try:
+            # when window is iconified/minimized, state() == 'iconic'
+            if self.state() == 'iconic':
+                _debug_mark("_on_unmap_event: state iconic -> minimize_to_tray")
+                self._minimize_to_tray()
+        except Exception as e:
+            _debug_mark(f"_on_unmap_event: exception {e}")
+
+    def _on_map_event(self, event=None):
+        try:
+            _debug_mark("_on_map_event: window mapped -> stop_tray")
+            self._stop_tray()
+        except Exception as e:
+            _debug_mark(f"_on_map_event: exception {e}")
+
+    def _watch_window_state(self):
+        try:
+            cur = self.state()
+            if cur != getattr(self, "_last_window_state", None):
+                _debug_mark(f"_watch_window_state: state changed {getattr(self,'_last_window_state',None)} -> {cur}")
+                if cur == 'iconic':
+                    # went to minimized
+                    try:
+                        _debug_mark("_watch_window_state: detected iconic -> minimize_to_tray")
+                        self._minimize_to_tray()
+                    except Exception as e:
+                        _debug_mark(f"_watch_window_state: minimize exception {e}")
+                elif cur in ('normal', 'zoomed'):
+                    try:
+                        _debug_mark("_watch_window_state: detected restore -> stop_tray")
+                        self._stop_tray()
+                    except Exception as e:
+                        _debug_mark(f"_watch_window_state: stop_tray exception {e}")
+                self._last_window_state = cur
+        except Exception as e:
+            _debug_mark(f"_watch_window_state: exception {e}")
+        finally:
+            try:
+                self.after(1000, self._watch_window_state)
+            except Exception:
+                pass
 
     def _clear_results(self):
         for w in getattr(self, "_tree_sections", []):
@@ -1337,6 +1775,10 @@ class SaveFinderApp(ctk.CTk):
         self._save_app_setting(APP_SETTINGS_AUTO_BACKUP, "1" if self._auto_backup_enabled else "0")
         if self._auto_backup_enabled:
             self._reset_auto_backup_state()
+        try:
+            self._update_tray_state()
+        except Exception:
+            pass
 
     def _choose_local_root(self):
         sel = filedialog.askdirectory()
@@ -1591,6 +2033,7 @@ class SaveFinderApp(ctk.CTk):
                     if drive_has_sha_dedupe_match(service, profile_folder_id, computed_sha12=sha12, log_callback=log_worker):
                         log_worker(f"[SUCCESS] Backup skipped (save contents unchanged; SHA suffix: {sha12}).\n")
                         return
+                    self._update_upload_progress("Uploading backup to Drive...", 0.0)
                     file_id = drive_upload_backup_zip(
                         service,
                         profile_folder_id=profile_folder_id,
@@ -1598,7 +2041,9 @@ class SaveFinderApp(ctk.CTk):
                         manifest=sha_manifest,
                         sha256_hex=content_hash,
                         log_callback=log_worker,
+                        progress_callback=self._update_upload_progress,
                     )
+                    self._reset_upload_progress()
                     drive_cleanup_old_backups(service, profile_folder_id, save_root, keep_file_id=file_id, log_callback=log_worker)
                     log_worker(f"[SUCCESS] Backup uploaded to Drive (file id={file_id}).\n")
                 else:
@@ -1833,12 +2278,22 @@ class SaveFinderApp(ctk.CTk):
                 service = None
                 app_folder_id = None
                 if self.storage_backend == "drive":
+                    # Drive mode: show progress while loading profiles from cloud
+                    self.after(0, lambda: self._show_upload_progress("Connecting to Drive...", 0.02))
+                    self.after(0, lambda: self._append_log_text("\n[DRIVE] Connecting & fetching profiles...\n"))
+
                     creds = drive_get_credentials(log_callback=None)
+                    self.after(0, lambda: self._show_upload_progress("Creating Drive service...", 0.10))
                     service = drive_get_service(creds, log_callback=None)
+
+                    self.after(0, lambda: self._show_upload_progress("Ensuring app folder...", 0.20))
                     app_folder_id = drive_get_or_create_app_folder(service, log_callback=None)
+
+                    self.after(0, lambda: self._show_upload_progress("Fetching profiles list...", 0.35))
                     profiles = drive_list_profiles(service, app_folder_id, log_callback=None)
                 else:
                     profiles = localfs_list_profiles(self.local_backups_root, log_callback=None)
+
 
                 # Count backups per profile (best-effort: only zips)
                 profile_info = []
@@ -1905,6 +2360,9 @@ class SaveFinderApp(ctk.CTk):
                     if prefer_local_results and not profile_result_paths:
                         to_pass = None
                     self._render_profiles_ui(profile_info, managed_games, to_pass, selected_profile_backups)
+                    # Drive-only: loading can finish quickly; ensure progress UI doesn't remain visible/stuck.
+                    if self.storage_backend == "drive":
+                        self._reset_upload_progress()
 
                 # Schedule UI update
                 self.after(0, _schedule_render)
@@ -2268,6 +2726,16 @@ class SaveFinderApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    app = SaveFinderApp()
-    app.mainloop()
-
+    import traceback
+    try:
+        _debug_mark("__main__: starting")
+        with open(os.path.join(_get_script_dir(), "save_finder.log"), "a", encoding="utf-8") as _lf:
+            _lf.write(f"\n--- Start {datetime.now().isoformat()} ---\n")
+        app = SaveFinderApp()
+        _debug_mark("__main__: SaveFinderApp created")
+        app.mainloop()
+    except Exception:
+        tb = traceback.format_exc()
+        with open(os.path.join(_get_script_dir(), "save_finder.log"), "a", encoding="utf-8") as _lf:
+            _lf.write(tb)
+        raise
