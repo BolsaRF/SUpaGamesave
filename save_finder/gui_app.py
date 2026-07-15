@@ -1276,7 +1276,10 @@ class SaveFinderApp(ctk.CTk):
             return
 
         save_root = self._detected_save_root_name(root_path)
-        default_profile = self._default_backup_profile_name(root_path)
+        # Prefer whatever profile is currently selected in the sidebar over
+        # guessing from the folder path — if you've already got a profile
+        # selected, that's almost always the one this backup belongs to.
+        default_profile = self.selected_profile_name or self._default_backup_profile_name(root_path)
 
         self._append_log_text(f"\n[STORAGE] Backup clicked for: {root_path} (backend={self.storage_backend})\n")
 
