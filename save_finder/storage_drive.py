@@ -281,6 +281,26 @@ def drive_upload_backup_zip(
     fid = response.get("id")
     if log_callback:
         log_callback(f"[DRIVE] Upload complete (id={fid})\n")
+
+    # Store the resolved local path as file metadata so future profile
+    # refreshes can read it back with a single metadata-only call instead
+    # of downloading and extracting the whole zip. Best-effort and set
+    # *after* the upload succeeds — never let this jeopardize the backup
+    # itself. appProperties has a small per-property size limit, so skip
+    # it entirely for unusually long paths rather than risk a truncated
+    # (silently wrong) path — the zip-manifest fallback always works
+    # regardless of length.
+    original_save_path = manifest.get("original_save_path")
+    if original_save_path and len(original_save_path) <= 100:
+        try:
+            service.files().update(
+                fileId=fid,
+                body={"appProperties": {"original_save_path": original_save_path}},
+            ).execute()
+        except Exception as e:
+            if log_callback:
+                log_callback(f"[DRIVE] Could not set fast-path metadata (non-fatal): {e}\n")
+
     return fid
 
 
@@ -317,6 +337,17 @@ def drive_cleanup_old_backups(
                 pass
     except Exception:
         pass
+
+
+def drive_get_app_property(service, file_id: str, key: str, log_callback=None) -> str | None:
+    """Read a single appProperty via a metadata-only call (no content download)."""
+    try:
+        meta = service.files().get(fileId=file_id, fields="appProperties").execute()
+        return (meta.get("appProperties") or {}).get(key)
+    except Exception as e:
+        if log_callback:
+            log_callback(f"[DRIVE] Could not read metadata for file id={file_id}: {e}\n")
+        return None
 
 
 def drive_download_file(service, file_id: str, dest_path: str, log_callback=None):

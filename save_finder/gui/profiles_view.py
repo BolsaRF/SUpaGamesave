@@ -22,6 +22,7 @@ from ..storage_drive import (
     drive_list_profiles,
     drive_list_profile_backups,
     drive_download_file,
+    drive_get_app_property,
 )
 from ..storage_local import (
     list_profiles as localfs_list_profiles,
@@ -117,7 +118,7 @@ class ProfilesView:
                 log_callback(f"[WARN] Auto-backup target scan failed: {e}\n")
         return targets
 
-    def refresh_profiles_ui(self, prefer_local_results: bool = False):
+    def refresh_profiles_ui(self, prefer_local_results: bool = False, full_rescan: bool = True):
         app = self.app
         if app._profiles_refreshing:
             return
@@ -133,6 +134,9 @@ class ProfilesView:
             try:
                 service = None
                 app_folder_id = None
+                cached_profile_info = getattr(app, "_cached_profile_info", None)
+                use_cached_profile_info = not full_rescan and cached_profile_info is not None
+
                 if app.storage_backend == "drive":
                     app.after(0, lambda: app._show_upload_progress("Connecting to Drive...", 0.02))
                     app.after(0, lambda: app._append_log_text("\n[DRIVE] Connecting & fetching profiles...\n"))
@@ -141,21 +145,32 @@ class ProfilesView:
                     app.after(0, lambda: app._show_upload_progress("Creating Drive service...", 0.10))
                     service = drive_get_service(creds, log_callback=None)
 
-                    app.after(0, lambda: app._show_upload_progress("Ensuring app folder...", 0.20))
-                    app_folder_id = drive_get_or_create_app_folder(service, log_callback=None)
+                    # The app folder essentially never changes mid-session,
+                    # so cache it too instead of re-fetching on every click.
+                    app_folder_id = getattr(app, "_cached_app_folder_id", None)
+                    if not app_folder_id:
+                        app.after(0, lambda: app._show_upload_progress("Ensuring app folder...", 0.20))
+                        app_folder_id = drive_get_or_create_app_folder(service, log_callback=None)
+                        app._cached_app_folder_id = app_folder_id
 
-                    app.after(0, lambda: app._show_upload_progress("Fetching profiles list...", 0.35))
-                    profiles = drive_list_profiles(service, app_folder_id, log_callback=None)
+                if use_cached_profile_info:
+                    profile_info = cached_profile_info
                 else:
-                    profiles = localfs_list_profiles(app.local_backups_root, log_callback=None)
-
-                profile_info = []
-                for pr in profiles:
                     if app.storage_backend == "drive":
-                        bks = drive_list_profile_backups(service, pr["id"], save_root=None, log_callback=None, limit=200)
+                        app.after(0, lambda: app._show_upload_progress("Fetching profiles list...", 0.35))
+                        profiles = drive_list_profiles(service, app_folder_id, log_callback=None)
                     else:
-                        bks = localfs_list_profile_backups(pr["id"], save_root=None, log_callback=None, limit=200)
-                    profile_info.append({"name": pr["name"], "id": pr["id"], "count": len(bks)})
+                        profiles = localfs_list_profiles(app.local_backups_root, log_callback=None)
+
+                    profile_info = []
+                    for pr in profiles:
+                        if app.storage_backend == "drive":
+                            bks = drive_list_profile_backups(service, pr["id"], save_root=None, log_callback=None, limit=200)
+                        else:
+                            bks = localfs_list_profile_backups(pr["id"], save_root=None, log_callback=None, limit=200)
+                        profile_info.append({"name": pr["name"], "id": pr["id"], "count": len(bks)})
+
+                    app._cached_profile_info = profile_info
 
                 selected = app.selected_profile_name
                 if not selected and profile_info:
@@ -238,11 +253,22 @@ class ProfilesView:
                 pass
 
     def _read_backup_manifest_path(self, service, backup_file_id: str, fallback_save_root: str | None = None) -> str | None:
+        is_local = backup_file_id and os.path.exists(str(backup_file_id))
+
+        # Fast path: newer Drive backups store this as file metadata, which
+        # is a single metadata-only API call instead of downloading and
+        # extracting the whole zip. Falls through to the slow path below
+        # for older backups uploaded before this existed.
+        if service is not None and not is_local:
+            fast_path = drive_get_app_property(service, backup_file_id, "original_save_path")
+            if fast_path:
+                return fast_path
+
         try:
             with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
                 tmp_path = tmp.name
             try:
-                if backup_file_id and os.path.exists(str(backup_file_id)):
+                if is_local:
                     shutil.copy2(str(backup_file_id), tmp_path)
                 else:
                     drive_download_file(service, file_id=backup_file_id, dest_path=tmp_path, log_callback=None)
@@ -395,7 +421,10 @@ class ProfilesView:
         app = self.app
         app.selected_profile_name = profile_name
         app._save_selected_profile_name()
-        self.refresh_profiles_ui()
+        # Switching selection doesn't need to re-list every other profile's
+        # backups again — reuse the cached sidebar list from the last full
+        # rescan, and only fetch details for the newly-selected profile.
+        self.refresh_profiles_ui(full_rescan=False)
 
     def delete_selected_profile_ui(self):
         app = self.app

@@ -859,6 +859,12 @@ class SaveFinderApp(ctk.CTk):
             self.local_root_entry.get().strip(),
             script_dir=os.path.dirname(os.path.abspath(__file__)),
         )
+
+        # These were cached against the old backend — clear them so the
+        # next refresh (below, a full rescan by default) doesn't reuse the
+        # wrong backend's profile list on a later lightweight click.
+        self._cached_profile_info = None
+        self._cached_app_folder_id = None
         self.refresh_profiles_ui()
 
         # Auto-backup targets were resolved against the old backend — clear
