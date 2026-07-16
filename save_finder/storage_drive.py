@@ -161,19 +161,24 @@ def drive_get_or_create_profile_folder(service, app_folder_id: str, profile_name
 
     profile_name = str(profile_name).strip()
 
+    # List all profile folders and match case-insensitively client-side,
+    # rather than Drive's exact-match `name =` query — a profile name
+    # confirmed with different casing across sessions (e.g. "octopath
+    # traveler 0" vs "Octopath Traveler 0") would otherwise silently create
+    # a second, duplicate folder instead of reusing the existing one, and
+    # backups would end up split across them (cleanup only ever looks
+    # inside the one folder it just uploaded into).
     q = (
         f"'{app_folder_id}' in parents and "
-        f"mimeType = '{GOOGLE_DRIVE_PROFILE_PARENT_MIME}' and "
-        f"name = '{profile_name}' and trashed = false"
+        f"mimeType = '{GOOGLE_DRIVE_PROFILE_PARENT_MIME}' and trashed = false"
     )
-
     resp = service.files().list(q=q, spaces="drive", fields="files(id, name)").execute()
-    files = resp.get("files", [])
-    if files:
-        fid = files[0]["id"]
-        if log_callback:
-            log_callback(f"[DRIVE] Using existing profile folder: {profile_name} (id={fid})\n")
-        return fid
+    for f in resp.get("files", []):
+        if str(f.get("name", "")).strip().lower() == profile_name.lower():
+            fid = f["id"]
+            if log_callback:
+                log_callback(f"[DRIVE] Using existing profile folder: {f.get('name')} (id={fid})\n")
+            return fid
 
     metadata = {
         "name": profile_name,
@@ -325,18 +330,24 @@ def drive_cleanup_old_backups(
             log_callback=log_callback,
             limit=2000,
         )
-        for backup in backups:
+        to_remove = [b for b in backups if str(b.get("id", "")) and str(b.get("id", "")) != (keep_file_id or "")]
+        if log_callback:
+            log_callback(
+                f"[DRIVE] Cleanup: {len(backups)} backup(s) found for '{save_root}', "
+                f"removing {len(to_remove)}, keeping id={keep_file_id}\n"
+            )
+        for backup in to_remove:
             fid = str(backup.get("id", ""))
-            if not fid or fid == (keep_file_id or ""):
-                continue
             try:
                 service.files().delete(fileId=fid).execute()
                 if log_callback:
                     log_callback(f"[DRIVE] Removed old backup id={fid}\n")
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as e:
+                if log_callback:
+                    log_callback(f"[WARN] Could not delete old backup id={fid}: {e}\n")
+    except Exception as e:
+        if log_callback:
+            log_callback(f"[WARN] Backup cleanup failed for '{save_root}': {e}\n")
 
 
 def drive_get_app_property(service, file_id: str, key: str, log_callback=None) -> str | None:

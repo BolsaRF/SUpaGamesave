@@ -124,18 +124,24 @@ def cleanup_old_backups(profile_folder_path: str, save_root: str, keep_path: str
         # UI-display-sized page, or backups beyond the limit could never be
         # cleaned up.
         backups = list_profile_backups(profile_folder_path, save_root=save_root, log_callback=log_callback, limit=2000)
-        for backup in backups:
+        to_remove = [b for b in backups if str(b.get("id", "")) and str(b.get("id", "")) != (keep_path or "")]
+        if log_callback:
+            log_callback(
+                f"[LOCAL] Cleanup: {len(backups)} backup(s) found for '{save_root}', "
+                f"removing {len(to_remove)}, keeping {keep_path}\n"
+            )
+        for backup in to_remove:
             path = str(backup.get("id", ""))
-            if not path or path == keep_path:
-                continue
             try:
                 os.remove(path)
                 if log_callback:
                     log_callback(f"[LOCAL] Removed old backup: {path}\n")
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as e:
+                if log_callback:
+                    log_callback(f"[WARN] Could not delete old backup {path}: {e}\n")
+    except Exception as e:
+        if log_callback:
+            log_callback(f"[WARN] Backup cleanup failed for '{save_root}': {e}\n")
 
 
 def download_file(file_path: str, dest_path: str, log_callback=None):
