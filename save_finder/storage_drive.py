@@ -322,13 +322,15 @@ def drive_cleanup_old_backups(
     try:
         # Cleanup needs to see every backup for this save_root, not just the
         # UI-display-sized page, or backups beyond the limit could never be
-        # cleaned up.
+        # cleaned up. Drive's files.list pageSize caps out at 1000 (a
+        # higher value is rejected outright with a 400 error) — this call
+        # isn't paginated, so 1000 is the real ceiling here.
         backups = drive_list_profile_backups(
             service,
             profile_folder_id,
             save_root=save_root,
             log_callback=log_callback,
-            limit=2000,
+            limit=1000,
         )
         to_remove = [b for b in backups if str(b.get("id", "")) and str(b.get("id", "")) != (keep_file_id or "")]
         if log_callback:
