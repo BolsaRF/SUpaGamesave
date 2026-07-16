@@ -13,6 +13,7 @@ APP_SETTINGS_AUTO_BACKUP = "auto_backup_enabled"
 APP_SETTINGS_START_AT_LOGIN = "start_at_login"
 APP_SETTINGS_WINDOW_GEOMETRY = "window_geometry"
 APP_SETTINGS_PANEL_SPLIT = "panel_split_x"
+APP_SETTINGS_TEMP_DIR = "temp_dir"
 
 
 def _get_script_dir() -> str:

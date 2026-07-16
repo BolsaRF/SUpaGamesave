@@ -380,12 +380,12 @@ def drive_download_file(service, file_id: str, dest_path: str, log_callback=None
         log_callback("[DRIVE] Download complete\n")
 
 
-def drive_restore_backup_zip(service, file_id: str, target_dir: str, log_callback=None) -> dict:
+def drive_restore_backup_zip(service, file_id: str, target_dir: str, log_callback=None, temp_dir: str | None = None) -> dict:
     """Downloads zip, extracts, then copies contents/* into target_dir."""
     if log_callback:
         log_callback("[RESTORE] Starting restore...\n")
 
-    with tempfile.TemporaryDirectory(prefix="savefinder_restore_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="savefinder_restore_", dir=temp_dir) as tmp:
         zip_path = os.path.join(tmp, "backup.zip")
         drive_download_file(service, file_id=file_id, dest_path=zip_path, log_callback=log_callback)
 

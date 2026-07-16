@@ -61,6 +61,7 @@ from save_finder.app_config import (
     APP_SETTINGS_START_AT_LOGIN,
     APP_SETTINGS_WINDOW_GEOMETRY,
     APP_SETTINGS_PANEL_SPLIT,
+    APP_SETTINGS_TEMP_DIR,
     load_setting,
     save_setting,
     set_start_at_login,
@@ -449,6 +450,28 @@ class SaveFinderApp(ctk.CTk):
 
         self.view_storage_root_btn = ctk.CTkButton(self.profiles_controls_row3, text="View Storage Root", width=130, command=self._view_storage_root)
         self.view_storage_root_btn.pack(side="left", padx=(8, 0))
+
+        # Row 4: where scratch zip files get created/extracted (defaults to
+        # the system temp folder if left blank).
+        self.profiles_controls_row4 = ctk.CTkFrame(self.profiles_controls, fg_color="transparent")
+        self.profiles_controls_row4.pack(fill="x", pady=(6, 0))
+
+        self.temp_dir_label = ctk.CTkLabel(self.profiles_controls_row4, text="Temp folder:")
+        self.temp_dir_label.pack(side="left", padx=(0, 6))
+
+        self.temp_dir_entry = ctk.CTkEntry(self.profiles_controls_row4, width=220, placeholder_text="System default")
+        self.temp_dir_entry.pack(side="left", padx=(0, 6))
+        stored_temp_dir = load_setting(self._settings_path, APP_SETTINGS_TEMP_DIR, "")
+        if stored_temp_dir and stored_temp_dir.strip():
+            self.temp_dir_entry.insert(0, os.path.normpath(stored_temp_dir.strip()))
+
+        self.temp_dir_browse_btn = ctk.CTkButton(self.profiles_controls_row4, text="Browse", width=60, command=self._choose_temp_dir)
+        self.temp_dir_browse_btn.pack(side="left", padx=(0, 6))
+
+        self.temp_dir_reset_btn = ctk.CTkButton(self.profiles_controls_row4, text="Reset", width=60, command=self._reset_temp_dir)
+        self.temp_dir_reset_btn.pack(side="left")
+
+        self.temp_dir = stored_temp_dir.strip() if stored_temp_dir and stored_temp_dir.strip() else None
 
         self.storage_backend = "drive" if self.storage_backend_var.get().lower() == "drive" else "local"
         self.local_backups_root = _localfs_backups_root(self.local_root_entry.get().strip(), script_dir=os.path.dirname(os.path.abspath(__file__)))
@@ -920,6 +943,23 @@ class SaveFinderApp(ctk.CTk):
             if self.storage_backend == "local":
                 self.refresh_profiles_ui()
 
+    def _choose_temp_dir(self):
+        sel = filedialog.askdirectory()
+        if sel:
+            temp_dir = os.path.normpath(sel)
+            os.makedirs(temp_dir, exist_ok=True)
+            self.temp_dir_entry.delete(0, "end")
+            self.temp_dir_entry.insert(0, temp_dir)
+            self.temp_dir = temp_dir
+            self._save_app_setting(APP_SETTINGS_TEMP_DIR, self.temp_dir)
+            self._append_log_text(f"\n[INFO] Temp folder set to: {self.temp_dir}\n")
+
+    def _reset_temp_dir(self):
+        self.temp_dir_entry.delete(0, "end")
+        self.temp_dir = None
+        self._save_app_setting(APP_SETTINGS_TEMP_DIR, "")
+        self._append_log_text("\n[INFO] Temp folder reset to system default.\n")
+
     # -------- auto backup --------
     def _reset_auto_backup_state(self):
         # compute_directory_tree_hash reads every file in each discovered
@@ -1253,7 +1293,7 @@ class SaveFinderApp(ctk.CTk):
                 "content_hash": content_hash,
             }
 
-            with tempfile.TemporaryDirectory(prefix="savefinder_backup_") as tmp:
+            with tempfile.TemporaryDirectory(prefix="savefinder_backup_", dir=self.temp_dir or None) as tmp:
                 zip_path = os.path.join(tmp, "backup.zip")
                 _create_zip_with_manifest(zip_path=zip_path, manifest=sha_manifest, folder_to_backup=root_path, log_callback=log_worker)
 
@@ -1392,9 +1432,9 @@ class SaveFinderApp(ctk.CTk):
                 self._backup_to_drive_worker(target_dir, profile_name, save_root, log_worker)
 
             if self.storage_backend == "drive":
-                result = drive_restore_backup_zip(service, file_id=chosen_file_id, target_dir=target_dir, log_callback=log_worker)
+                result = drive_restore_backup_zip(service, file_id=chosen_file_id, target_dir=target_dir, log_callback=log_worker, temp_dir=self.temp_dir or None)
             else:
-                result = localfs_restore_backup_zip(chosen_file_id, target_dir, log_callback=log_worker)
+                result = localfs_restore_backup_zip(chosen_file_id, target_dir, log_callback=log_worker, temp_dir=self.temp_dir or None)
 
             stats = result.get("stats", {})
             log_worker(
@@ -1523,9 +1563,9 @@ class SaveFinderApp(ctk.CTk):
                         return
                     creds = drive_get_credentials(log_callback=None)
                     service = drive_get_service(creds, log_callback=None)
-                    result = drive_restore_backup_zip(service, file_id=backup_entry.get("id"), target_dir=target_dir, log_callback=None)
+                    result = drive_restore_backup_zip(service, file_id=backup_entry.get("id"), target_dir=target_dir, log_callback=None, temp_dir=self.temp_dir or None)
                 else:
-                    result = localfs_restore_backup_zip(str(backup_entry.get("id", "")), target_dir=target_dir, log_callback=None)
+                    result = localfs_restore_backup_zip(str(backup_entry.get("id", "")), target_dir=target_dir, log_callback=None, temp_dir=self.temp_dir or None)
 
                 stats = result.get("stats", {})
                 self._queue_log("SUCCESS", f"[STORAGE] Restore complete. copied={stats.get('copied')}, skipped={stats.get('skipped')}, total={stats.get('total')}\n")

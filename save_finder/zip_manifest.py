@@ -80,12 +80,12 @@ def copy_contents_into_target(zip_extract_dir: str, target_dir: str, log_callbac
     return {"copied": copied, "skipped": skipped, "total": total}
 
 
-def restore_zip_to_target(zip_path: str, target_dir: str, log_callback=None) -> dict:
+def restore_zip_to_target(zip_path: str, target_dir: str, log_callback=None, temp_dir: str | None = None) -> dict:
     """Convenience helper for local restore."""
     if log_callback:
         log_callback("[RESTORE] Starting local restore...\n")
 
-    with tempfile.TemporaryDirectory(prefix="savefinder_restore_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="savefinder_restore_", dir=temp_dir) as tmp:
         tmp_zip = os.path.join(tmp, "backup.zip")
         shutil.copy2(zip_path, tmp_zip)
 

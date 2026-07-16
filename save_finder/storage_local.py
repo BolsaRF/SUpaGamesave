@@ -151,9 +151,9 @@ def download_file(file_path: str, dest_path: str, log_callback=None):
     shutil.copy2(file_path, dest_path)
 
 
-def restore_backup_zip(file_path: str, target_dir: str, log_callback=None) -> dict:
+def restore_backup_zip(file_path: str, target_dir: str, log_callback=None, temp_dir: str | None = None) -> dict:
     # Backwards-compat wrapper over zip_manifest helpers
-    return restore_zip_to_target(file_path, target_dir, log_callback=log_callback)
+    return restore_zip_to_target(file_path, target_dir, log_callback=log_callback, temp_dir=temp_dir)
 
 
 def list_profiles_storage_root(default_root: str | None = None):

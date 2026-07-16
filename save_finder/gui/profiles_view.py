@@ -265,7 +265,7 @@ class ProfilesView:
                 return fast_path
 
         try:
-            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False, dir=self.app.temp_dir or None) as tmp:
                 tmp_path = tmp.name
             try:
                 if is_local:
