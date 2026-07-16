@@ -1271,7 +1271,7 @@ class SaveFinderApp(ctk.CTk):
             daemon=True,
         ).start()
 
-    def _backup_to_drive_worker(self, root_path: str, profile_name: str, save_root: str, log_worker):
+    def _backup_to_drive_worker(self, root_path: str, profile_name: str, save_root: str, log_worker, skip_cleanup: bool = False):
         try:
             log_worker(f"[STORAGE] Backup started... (backend={self.storage_backend})\n")
 
@@ -1315,7 +1315,8 @@ class SaveFinderApp(ctk.CTk):
                         progress_callback=self._update_upload_progress,
                     )
                     self._reset_upload_progress()
-                    drive_cleanup_old_backups(service, profile_folder_id, save_root, keep_file_id=file_id, log_callback=log_worker)
+                    if not skip_cleanup:
+                        drive_cleanup_old_backups(service, profile_folder_id, save_root, keep_file_id=file_id, log_callback=log_worker)
                     log_worker(f"[SUCCESS] Backup uploaded to Drive (file id={file_id}).\n")
                 else:
                     if localfs_has_sha_dedupe_match(profile_folder_id, computed_sha12=sha12, log_callback=log_worker):
@@ -1329,7 +1330,8 @@ class SaveFinderApp(ctk.CTk):
                         sha256_hex=content_hash,
                         log_callback=log_worker,
                     )
-                    localfs_cleanup_old_backups(profile_folder_id, save_root, keep_path=file_id, log_callback=log_worker)
+                    if not skip_cleanup:
+                        localfs_cleanup_old_backups(profile_folder_id, save_root, keep_path=file_id, log_callback=log_worker)
                     log_worker(f"[SUCCESS] Backup saved to local folder (path={file_id}).\n")
         except Exception as e:
             log_worker(f"[ERROR] Backup failed: {e}\n")
@@ -1429,7 +1431,12 @@ class SaveFinderApp(ctk.CTk):
 
             if os.path.isdir(target_dir) and os.listdir(target_dir):
                 log_worker(f"[SAFETY] Backing up current state of '{target_dir}' before restoring...\n")
-                self._backup_to_drive_worker(target_dir, profile_name, save_root, log_worker)
+                # skip_cleanup=True: cleanup would delete every other backup
+                # for this save_root, including chosen_file_id — the very
+                # backup we're about to restore from a few lines down. The
+                # next normal backup (cleanup enabled) will collapse this
+                # safety copy + the restored-from backup back down to one.
+                self._backup_to_drive_worker(target_dir, profile_name, save_root, log_worker, skip_cleanup=True)
 
             if self.storage_backend == "drive":
                 result = drive_restore_backup_zip(service, file_id=chosen_file_id, target_dir=target_dir, log_callback=log_worker, temp_dir=self.temp_dir or None)
@@ -1556,7 +1563,10 @@ class SaveFinderApp(ctk.CTk):
                     profile_name = self.selected_profile_name or self._detected_save_root_name(target_dir)
                     save_root = self._detected_save_root_name(target_dir)
                     _log_worker(f"[SAFETY] Backing up current state of '{target_dir}' before restoring...\n")
-                    self._backup_to_drive_worker(target_dir, profile_name, save_root, _log_worker)
+                    # skip_cleanup=True: cleanup would delete every other
+                    # backup for this save_root, including the one we're
+                    # about to restore from below.
+                    self._backup_to_drive_worker(target_dir, profile_name, save_root, _log_worker, skip_cleanup=True)
 
                 if self.storage_backend == "drive":
                     if not self._ensure_drive_available_or_log():
