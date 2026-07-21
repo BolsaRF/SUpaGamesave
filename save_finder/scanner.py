@@ -5,69 +5,52 @@ import re
 import sys
 import urllib.error
 import urllib.request
-try:
-    import winreg
-except ImportError:
-    winreg = None  # type: ignore
- 
-# Allow running this file directly for testing, which is likely how the
-# user encountered the ImportError.
-if __package__ is None or __package__ == "":
-    # Add project root to sys.path so `import save_finder` works
-    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if _PROJECT_ROOT not in sys.path:
-        sys.path.insert(0, _PROJECT_ROOT)
-    from save_finder.hashing import compute_directory_tree_hash
-else:
-    from .hashing import compute_directory_tree_hash
- 
-def _get_steam_path(log_callback):
-    """Tries to find Steam installation path from the registry."""
-    if not winreg:
-        return None
+
+from .hashing import compute_directory_tree_hash  # may be useful elsewhere
+
+_ID_KEYED_CONTAINERS_SETTING_KEY = "id_keyed_save_containers"
+_DEFAULT_ID_KEYED_SAVE_CONTAINERS = [
+    "Goldberg SteamEmu Saves",
+    "Goldberg UplayEmu Saves",
+]
+_ID_CACHE_FILENAME = "emu_id_cache.json"
+
+
+def _get_id_keyed_save_containers():
+    """Known emulator-loader save containers, plus any extra names the user
+    has added to save_finder.ini under [app] id_keyed_save_containers=
+    (comma-separated) — lets newly-discovered fork folder names be added
+    without a code change."""
+    settings_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), APP_SETTINGS_FILE
+    )
+    extra = load_setting(settings_path, _ID_KEYED_CONTAINERS_SETTING_KEY, "") or ""
+    extra_names = [name.strip() for name in extra.split(",") if name.strip()]
+    return list(dict.fromkeys(_DEFAULT_ID_KEYED_SAVE_CONTAINERS + extra_names))
+
+
+def _id_cache_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), _ID_CACHE_FILENAME)
+
+
+def _load_id_cache():
+    """Remembers, per game keyword, which numeric ID folder was previously
+    confirmed for each ID-keyed container — so a later scan of the same
+    game (e.g. the loader ini got deleted, or AppID can't be re-extracted)
+    doesn't have to fall back to guessing by recency again."""
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
-            steam_path, _ = winreg.QueryValueEx(key, "SteamPath")
-            if steam_path and os.path.isdir(steam_path):
-                return steam_path
-    except Exception as e:
-        log_callback(f"   [API] Could not read Steam path from registry: {e}\n")
-
-    # Fallback to common locations
-    for path in [
-        os.environ.get("ProgramFiles(x86)"),
-        os.environ.get("ProgramFiles"),
-    ]:
-        if path:
-            steam_path_fallback = os.path.join(path, "Steam")
-            if os.path.isdir(steam_path_fallback):
-                return steam_path_fallback
-    return None
+        with open(_id_cache_path(), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
-def find_steam_userdata_folders(log_callback):
-    """Tries to find Steam userdata folders."""
-    steam_path = _get_steam_path(log_callback)
-    if not steam_path:
-        log_callback("   [API] Steam installation path not found.\n")
-        return []
-
-    userdata_path = os.path.join(steam_path, "userdata")
-    if not os.path.isdir(userdata_path):
-        return []
-
-    user_folders = []
+def _save_id_cache(cache):
     try:
-        for item in os.listdir(userdata_path):
-            # User IDs are numbers. Ignore '0' and other non-numeric folders.
-            if item.isdigit() and item != "0":
-                full_path = os.path.join(userdata_path, item)
-                if os.path.isdir(full_path):
-                    user_folders.append(full_path)
-    except Exception as e:
-        log_callback(f"   [API] Could not list Steam userdata folders: {e}\n")
-
-    return user_folders
+        with open(_id_cache_path(), "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+    except Exception:
+        pass
 
 
 def get_steam_api_data(app_id, log_callback):
@@ -177,7 +160,15 @@ def run_save_finder(game_directory, log_callback, success_callback):
         "tenoke.ini",
         "rune.ini",
         "epic_emu.ini",
+        "uplay_r1_loader.ini",
+        "uplay_r2_loader64.ini",
+        "uplay_emu.ini",
     ]
+
+    # AppData containers where emulator loaders (Goldberg's Steam/Uplay forks)
+    # keep saves in a subfolder named after the numeric AppID/UplayID rather
+    # than the game's name, so keyword matching alone can never find them.
+    id_keyed_save_containers = _get_id_keyed_save_containers()
 
     log_callback(f"[1/3] Scanning '{game_directory}' for emulators...\n")
 
@@ -253,7 +244,15 @@ def run_save_finder(game_directory, log_callback, success_callback):
                 for key in config[section]:
                     if key.lower() in ["savepath", "storage"]:
                         save_path = config[section][key]
-                    elif key.lower() == "appid":
+                    elif key.lower() in [
+                        "appid",
+                        "app_id",
+                        "uplayid",
+                        "uplay_id",
+                        "ubi_id",
+                        "game_id",
+                        "gameid",
+                    ]:
                         app_id = config[section][key]
 
             if save_path:
@@ -402,15 +401,7 @@ def run_save_finder(game_directory, log_callback, success_callback):
         if score >= 40:
             verified_save_directories.append((path, score))
 
-    # --- CONSOLIDATE & SCORE ---
-    # Consolidate paths from all search methods, keeping the highest score for each unique path.
-    path_scores = {}
-    for path, score in verified_save_directories:
-        path_scores[path] = max(path_scores.get(path, 0), score)
-
-    consolidated_saves = list(path_scores.items())
-    consolidated_saves.sort(key=lambda x: x[1], reverse=True)
-    log_callback("   [SCAN] Consolidating and sorting all found paths...\n")
+    verified_save_directories.sort(key=lambda x: x[1], reverse=True)
 
     # --- SUBFOLDER FILTERING ---
     # Remove paths that are subdirectories of other, higher-scoring paths.
