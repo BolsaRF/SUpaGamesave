@@ -5,7 +5,52 @@ import re
 import urllib.error
 import urllib.request
 
+from .app_config import APP_SETTINGS_FILE, load_setting
 from .hashing import compute_directory_tree_hash  # may be useful elsewhere
+
+_ID_KEYED_CONTAINERS_SETTING_KEY = "id_keyed_save_containers"
+_DEFAULT_ID_KEYED_SAVE_CONTAINERS = [
+    "Goldberg SteamEmu Saves",
+    "Goldberg UplayEmu Saves",
+]
+_ID_CACHE_FILENAME = "emu_id_cache.json"
+
+
+def _get_id_keyed_save_containers():
+    """Known emulator-loader save containers, plus any extra names the user
+    has added to save_finder.ini under [app] id_keyed_save_containers=
+    (comma-separated) — lets newly-discovered fork folder names be added
+    without a code change."""
+    settings_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), APP_SETTINGS_FILE
+    )
+    extra = load_setting(settings_path, _ID_KEYED_CONTAINERS_SETTING_KEY, "") or ""
+    extra_names = [name.strip() for name in extra.split(",") if name.strip()]
+    return list(dict.fromkeys(_DEFAULT_ID_KEYED_SAVE_CONTAINERS + extra_names))
+
+
+def _id_cache_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), _ID_CACHE_FILENAME)
+
+
+def _load_id_cache():
+    """Remembers, per game keyword, which numeric ID folder was previously
+    confirmed for each ID-keyed container — so a later scan of the same
+    game (e.g. the loader ini got deleted, or AppID can't be re-extracted)
+    doesn't have to fall back to guessing by recency again."""
+    try:
+        with open(_id_cache_path(), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_id_cache(cache):
+    try:
+        with open(_id_cache_path(), "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+    except Exception:
+        pass
 
 
 def get_steam_api_data(app_id, log_callback):
@@ -115,7 +160,15 @@ def run_save_finder(game_directory, log_callback, success_callback):
         "tenoke.ini",
         "rune.ini",
         "epic_emu.ini",
+        "uplay_r1_loader.ini",
+        "uplay_r2_loader64.ini",
+        "uplay_emu.ini",
     ]
+
+    # AppData containers where emulator loaders (Goldberg's Steam/Uplay forks)
+    # keep saves in a subfolder named after the numeric AppID/UplayID rather
+    # than the game's name, so keyword matching alone can never find them.
+    id_keyed_save_containers = _get_id_keyed_save_containers()
 
     log_callback(f"[1/3] Scanning '{game_directory}' for emulators...\n")
 
@@ -191,7 +244,15 @@ def run_save_finder(game_directory, log_callback, success_callback):
                 for key in config[section]:
                     if key.lower() in ["savepath", "storage"]:
                         save_path = config[section][key]
-                    elif key.lower() == "appid":
+                    elif key.lower() in [
+                        "appid",
+                        "app_id",
+                        "uplayid",
+                        "uplay_id",
+                        "ubi_id",
+                        "game_id",
+                        "gameid",
+                    ]:
                         app_id = config[section][key]
 
             if save_path:
@@ -289,6 +350,89 @@ def run_save_finder(game_directory, log_callback, success_callback):
 
         if score >= 40:
             verified_save_directories.append((path, score))
+
+    # --- ID-KEYED EMULATOR SAVE CONTAINERS (Goldberg SteamEmu/UplayEmu, etc.) ---
+    # These store saves under <container>/<numeric id>/, so the folder name
+    # itself carries no game keywords. Resolve them by exact AppID match when
+    # known, else by keyword hits inside the ID folder, else fall back to the
+    # most recently modified ID folder as a low-confidence guess.
+    appdata_root = os.environ.get("APPDATA", "")
+    id_cache = _load_id_cache()
+    cache_key = base_keyword
+    id_cache_dirty = False
+
+    for container_name in id_keyed_save_containers:
+        container_path = os.path.join(appdata_root, container_name)
+        if not container_path or not os.path.isdir(container_path):
+            continue
+
+        if app_id and os.path.isdir(os.path.join(container_path, str(app_id))):
+            verified_save_directories.append(
+                (os.path.join(container_path, str(app_id)), 100)
+            )
+            id_cache.setdefault(cache_key, {})[container_name] = str(app_id)
+            id_cache_dirty = True
+            continue
+
+        try:
+            id_folders = [
+                os.path.join(container_path, d)
+                for d in os.listdir(container_path)
+                if d.isdigit() and os.path.isdir(os.path.join(container_path, d))
+            ]
+        except PermissionError:
+            id_folders = []
+
+        matched_by_content = False
+        for id_folder in id_folders:
+            nested_names = []
+            try:
+                for sub_root, sub_dirs, sub_files in os.walk(id_folder):
+                    nested_names.extend(d.lower() for d in sub_dirs)
+                    nested_names.extend(
+                        os.path.splitext(f)[0].lower() for f in sub_files
+                    )
+            except PermissionError:
+                continue
+
+            if any(
+                term in name for name in nested_names for term in all_search_terms
+            ):
+                verified_save_directories.append((id_folder, 90))
+                matched_by_content = True
+                id_cache.setdefault(cache_key, {})[container_name] = os.path.basename(
+                    id_folder
+                )
+                id_cache_dirty = True
+
+        if matched_by_content or not id_folders:
+            continue
+
+        cached_id = id_cache.get(cache_key, {}).get(container_name)
+        cached_folder = os.path.join(container_path, cached_id) if cached_id else None
+        if cached_folder and os.path.isdir(cached_folder):
+            log_callback(
+                f"   [SUCCESS] Reused ID '{cached_id}' confirmed for this game in "
+                f"an earlier scan under '{container_name}'.\n"
+            )
+            verified_save_directories.append((cached_folder, 95))
+            continue
+
+        # No confident match and nothing cached for this game yet — surface
+        # every numeric ID folder (instead of silently guessing just one) so
+        # the user can pick the right one manually; newest first as a hint.
+        id_folders_by_recency = sorted(id_folders, key=os.path.getmtime, reverse=True)
+        log_callback(
+            f"   [?] Found {len(id_folders_by_recency)} unmatched numeric ID save "
+            f"folder(s) under '{container_name}' with no name to confirm against. "
+            f"Listing all, most recently modified first, for manual review:\n"
+        )
+        for rank, folder in enumerate(id_folders_by_recency):
+            log_callback(f"      -> {folder}\n")
+            verified_save_directories.append((folder, 36 if rank == 0 else 35))
+
+    if id_cache_dirty:
+        _save_id_cache(id_cache)
 
     verified_save_directories.sort(key=lambda x: x[1], reverse=True)
 
