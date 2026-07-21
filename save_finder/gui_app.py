@@ -326,9 +326,6 @@ class SaveFinderApp(ctk.CTk):
         # Results panel (left)
         self.results_frame = ctk.CTkFrame(self.main_paned)
         self.main_paned.add(self.results_frame, minsize=520, stretch="always")
-        self.results_frame.grid_rowconfigure(0, weight=0)
-        self.results_frame.grid_rowconfigure(1, weight=1)
-        self.results_frame.grid_columnconfigure(0, weight=1)
 
         self.results_label = ctk.CTkLabel(self.results_frame, text="Detected Save Locations", font=ctk.CTkFont(size=14, weight="bold"))
         self.results_label.pack(anchor="w", padx=10, pady=(10, 0))
@@ -357,8 +354,6 @@ class SaveFinderApp(ctk.CTk):
         # Profiles panel (right)
         self.profiles_frame = ctk.CTkFrame(self.main_paned)
         self.main_paned.add(self.profiles_frame, minsize=700, stretch="always")
-        self.profiles_frame.grid_rowconfigure(5, weight=1)
-        self.profiles_frame.grid_columnconfigure(0, weight=1)
 
         self.profiles_label = ctk.CTkLabel(self.profiles_frame, text="Profiles", font=ctk.CTkFont(size=14, weight="bold"))
         self.profiles_label.pack(anchor="w", padx=10, pady=(10, 0))
