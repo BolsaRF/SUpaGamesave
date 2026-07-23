@@ -1305,16 +1305,21 @@ class SaveFinderApp(ctk.CTk):
                         return
 
                     self._update_upload_progress("Uploading backup to Drive...", 0.0)
-                    file_id = drive_upload_backup_zip(
-                        service,
-                        profile_folder_id=profile_folder_id,
-                        zip_path=zip_path,
-                        manifest=sha_manifest,
-                        sha256_hex=content_hash,
-                        log_callback=log_worker,
-                        progress_callback=self._update_upload_progress,
-                    )
-                    self._reset_upload_progress()
+                    try:
+                        file_id = drive_upload_backup_zip(
+                            service,
+                            profile_folder_id=profile_folder_id,
+                            zip_path=zip_path,
+                            manifest=sha_manifest,
+                            sha256_hex=content_hash,
+                            log_callback=log_worker,
+                            progress_callback=self._update_upload_progress,
+                        )
+                    finally:
+                        # Runs on this background thread — must not touch
+                        # the progress bar widgets directly (Tkinter isn't
+                        # thread-safe); hop back to the main thread instead.
+                        self.after(0, self._reset_upload_progress)
                     if not skip_cleanup:
                         drive_cleanup_old_backups(service, profile_folder_id, save_root, keep_file_id=file_id, log_callback=log_worker)
                     log_worker(f"[SUCCESS] Backup uploaded to Drive (file id={file_id}).\n")
@@ -1448,7 +1453,10 @@ class SaveFinderApp(ctk.CTk):
                 f"[SUCCESS] Restore complete. copied={stats.get('copied')}, skipped={stats.get('skipped')}, total={stats.get('total')}.\n"
             )
 
-            self.refresh_profiles_ui()
+            # Runs on this background thread — must not touch profile
+            # widgets directly (Tkinter isn't thread-safe); hop back to
+            # the main thread instead.
+            self.after(0, self.refresh_profiles_ui)
         except Exception as e:
             log_worker(f"[ERROR] Restore failed: {e}\n")
 
