@@ -6,27 +6,90 @@ import sys
 import urllib.error
 import urllib.request
 
+try:
+    import winreg
+except ImportError:
+    winreg = None  # type: ignore
+
+from .app_config import APP_SETTINGS_FILE, load_setting
 from .hashing import compute_directory_tree_hash  # may be useful elsewhere
 
 _ID_KEYED_CONTAINERS_SETTING_KEY = "id_keyed_save_containers"
-_DEFAULT_ID_KEYED_SAVE_CONTAINERS = [
-    "Goldberg SteamEmu Saves",
-    "Goldberg UplayEmu Saves",
-]
 _ID_CACHE_FILENAME = "emu_id_cache.json"
 
 
-def _get_id_keyed_save_containers():
-    """Known emulator-loader save containers, plus any extra names the user
-    has added to save_finder.ini under [app] id_keyed_save_containers=
-    (comma-separated) — lets newly-discovered fork folder names be added
-    without a code change."""
-    settings_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), APP_SETTINGS_FILE
-    )
+def _get_steam_path(log_callback):
+    """Tries to find the Steam installation path from the registry."""
+    if not winreg:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            steam_path, _ = winreg.QueryValueEx(key, "SteamPath")
+            if steam_path and os.path.isdir(steam_path):
+                return steam_path
+    except Exception as e:
+        log_callback(f"   [API] Could not read Steam path from registry: {e}\n")
+
+    for path in [os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")]:
+        if path:
+            steam_path_fallback = os.path.join(path, "Steam")
+            if os.path.isdir(steam_path_fallback):
+                return steam_path_fallback
+    return None
+
+
+def find_steam_userdata_folders(log_callback):
+    """Finds per-user Steam 'userdata/<id>' folders — another common save location."""
+    steam_path = _get_steam_path(log_callback)
+    if not steam_path:
+        return []
+
+    userdata_path = os.path.join(steam_path, "userdata")
+    if not os.path.isdir(userdata_path):
+        return []
+
+    user_folders = []
+    try:
+        for item in os.listdir(userdata_path):
+            # User IDs are numbers. Ignore '0' and other non-numeric folders.
+            if item.isdigit() and item != "0":
+                full_path = os.path.join(userdata_path, item)
+                if os.path.isdir(full_path):
+                    user_folders.append(full_path)
+    except Exception as e:
+        log_callback(f"   [API] Could not list Steam userdata folders: {e}\n")
+
+    return user_folders
+
+
+def _get_id_keyed_containers(log_callback):
+    """Containers where a loader (Goldberg's Steam/Uplay emulator forks,
+    CODEX, Steam's own userdata folders) keeps saves in a subfolder named
+    after the numeric AppID/UplayID rather than the game's name, so keyword
+    matching alone can never find them. Extra container paths can be added
+    via save_finder.ini under [app] id_keyed_save_containers= (comma
+    separated folder names resolved under %APPDATA%), letting newly
+    discovered fork folder names be added without a code change.
+    """
+    appdata = os.environ.get("APPDATA", "")
+    public_docs = os.path.join(os.environ.get("PUBLIC", r"C:\\Users\\Public"), "Documents")
+
+    containers = [
+        os.path.join(appdata, "Goldberg SteamEmu Saves"),
+        os.path.join(appdata, "Goldberg UplayEmu Saves"),
+        os.path.join(public_docs, "Steam", "CODEX"),
+        os.path.join(public_docs, "Steam"),
+    ]
+    containers.extend(find_steam_userdata_folders(log_callback))
+
+    settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), APP_SETTINGS_FILE)
     extra = load_setting(settings_path, _ID_KEYED_CONTAINERS_SETTING_KEY, "") or ""
-    extra_names = [name.strip() for name in extra.split(",") if name.strip()]
-    return list(dict.fromkeys(_DEFAULT_ID_KEYED_SAVE_CONTAINERS + extra_names))
+    for name in extra.split(","):
+        name = name.strip()
+        if name:
+            containers.append(os.path.join(appdata, name))
+
+    return list(dict.fromkeys(p for p in containers if p))
 
 
 def _id_cache_path():
@@ -36,8 +99,8 @@ def _id_cache_path():
 def _load_id_cache():
     """Remembers, per game keyword, which numeric ID folder was previously
     confirmed for each ID-keyed container — so a later scan of the same
-    game (e.g. the loader ini got deleted, or AppID can't be re-extracted)
-    doesn't have to fall back to guessing by recency again."""
+    game (e.g. the loader ini got deleted, or an AppID can't be
+    re-extracted) doesn't have to fall back to guessing by recency again."""
     try:
         with open(_id_cache_path(), "r", encoding="utf-8") as f:
             return json.load(f)
@@ -51,6 +114,11 @@ def _save_id_cache(cache):
             json.dump(cache, f, indent=2)
     except Exception:
         pass
+
+
+def _container_label(container_path):
+    parts = [p for p in re.split(r"[\\/]", container_path) if p]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else (parts[-1] if parts else container_path)
 
 
 def get_steam_api_data(app_id, log_callback):
@@ -165,11 +233,6 @@ def run_save_finder(game_directory, log_callback, success_callback):
         "uplay_emu.ini",
     ]
 
-    # AppData containers where emulator loaders (Goldberg's Steam/Uplay forks)
-    # keep saves in a subfolder named after the numeric AppID/UplayID rather
-    # than the game's name, so keyword matching alone can never find them.
-    id_keyed_save_containers = _get_id_keyed_save_containers()
-
     log_callback(f"[1/3] Scanning '{game_directory}' for emulators...\n")
 
     if not os.path.exists(game_directory):
@@ -281,87 +344,110 @@ def run_save_finder(game_directory, log_callback, success_callback):
     ue_keywords = get_unreal_project_name(game_directory)
 
     high_priority_keywords = list(set([base_keyword] + exe_keywords + ue_keywords))
+    all_search_terms = list(set(high_priority_keywords + dev_keywords + pub_keywords))
 
     verified_save_directories = []
-    appdata = os.environ.get("APPDATA", "")
-    public_docs = os.path.join(os.environ.get("PUBLIC", r"C:\\Users\\Public"), "Documents")
 
-    # --- HIGH-CONFIDENCE PATHS ---
-    log_callback("   [SCAN] Checking high-confidence emulator and user paths...\n")
-    high_confidence_paths = []
-    if app_id:
-        # Steam/CODEX paths
-        high_confidence_paths.append(os.path.join(public_docs, "Steam", "CODEX", app_id))
-        high_confidence_paths.append(os.path.join(public_docs, "Steam", app_id))
+    # --- ID-KEYED EMULATOR/LOADER SAVE CONTAINERS ---
+    # Goldberg's Steam/Uplay forks, CODEX, and Steam itself all store saves
+    # under <container>/<numeric id>/, so the folder name itself carries no
+    # game keywords — resolve them by exact AppID match when known, else by
+    # keyword hits inside the ID folder, else a previously-confirmed cache
+    # entry, else surface every candidate for manual review instead of
+    # silently guessing.
+    log_callback("   [SCAN] Checking ID-keyed emulator/loader save containers...\n")
+    id_cache = _load_id_cache()
+    cache_key = base_keyword
+    id_cache_dirty = False
 
-        # Goldberg paths
-        high_confidence_paths.append(os.path.join(appdata, "Goldberg SteamEmu Saves", app_id))
-        high_confidence_paths.append(os.path.join(appdata, "Goldberg UplayEmu Saves", app_id))
-
-        # Steam userdata paths
-        steam_userdata_folders = find_steam_userdata_folders(log_callback)
-        for user_folder in steam_userdata_folders:
-            high_confidence_paths.append(os.path.join(user_folder, app_id))
-
-    for path in high_confidence_paths:
-        if path and os.path.isdir(path):
-            log_callback(f"   [SCAN] Found high-confidence path: {path}\n")
-            # Add with a very high score to ensure it's included.
-            verified_save_directories.append((path, 100))
-
-    # --- HIGH-CONFIDENCE PATHS (AppID UNKNOWN) ---
-    # This block is crucial for when we can't find an AppID in an .ini file.
-    # It scans common emulator roots for any numeric folder, assuming it's an AppID.
-    # This is a heuristic, but a very effective one for this class of games.
-    log_callback("   [SCAN] Checking common emulator roots for any numeric AppID folders...\n")
-    emu_roots_to_scan_for_any_appid = [
-        (os.path.join(appdata, "Goldberg SteamEmu Saves"), "Goldberg SteamEmu"),
-        (os.path.join(appdata, "Goldberg UplayEmu Saves"), "Goldberg UplayEmu"),
-        (os.path.join(public_docs, "Steam", "CODEX"), "CODEX"),
-        # Some games place the AppID folder directly in Public Documents\Steam
-        (os.path.join(public_docs, "Steam"), "Steam"),
-    ]
-    for root, emu_name in emu_roots_to_scan_for_any_appid:
-        if not os.path.isdir(root):
+    for container_path in _get_id_keyed_containers(log_callback):
+        if not os.path.isdir(container_path):
             continue
+        label = _container_label(container_path)
+
+        if app_id and os.path.isdir(os.path.join(container_path, str(app_id))):
+            matched = os.path.join(container_path, str(app_id))
+            log_callback(f"   [SCAN] Found high-confidence path: {matched}\n")
+            verified_save_directories.append((matched, 100))
+            id_cache.setdefault(cache_key, {})[container_path] = str(app_id)
+            id_cache_dirty = True
+            continue
+
         try:
-            for item in os.listdir(root):
-                # If a subfolder is just a number, it's an AppID folder.
-                if item.isdigit() and os.path.isdir(os.path.join(root, item)):
-                    path = os.path.join(root, item)
-                    log_callback(f"   [SCAN] Found potential {emu_name} save folder: {path}\n")
-                    # Add with a score high enough to pass, but lower than a confirmed AppID match.
-                    verified_save_directories.append((path, 75))
-        except Exception as e:
-            log_callback(f"   [SCAN] Error scanning {root}: {e}\n")
+            id_folders = [
+                os.path.join(container_path, d)
+                for d in os.listdir(container_path)
+                if d.isdigit() and os.path.isdir(os.path.join(container_path, d))
+            ]
+        except PermissionError:
+            id_folders = []
+
+        matched_by_content = False
+        for id_folder in id_folders:
+            nested_names = []
+            try:
+                for sub_root, sub_dirs, sub_files in os.walk(id_folder):
+                    nested_names.extend(d.lower() for d in sub_dirs)
+                    nested_names.extend(
+                        os.path.splitext(f)[0].lower() for f in sub_files
+                    )
+            except PermissionError:
+                continue
+
+            if any(
+                term in name for name in nested_names for term in all_search_terms
+            ):
+                log_callback(f"   [SCAN] Found content match under '{label}': {id_folder}\n")
+                verified_save_directories.append((id_folder, 90))
+                matched_by_content = True
+                id_cache.setdefault(cache_key, {})[container_path] = os.path.basename(
+                    id_folder
+                )
+                id_cache_dirty = True
+
+        if matched_by_content or not id_folders:
+            continue
+
+        cached_id = id_cache.get(cache_key, {}).get(container_path)
+        cached_folder = os.path.join(container_path, cached_id) if cached_id else None
+        if cached_folder and os.path.isdir(cached_folder):
+            log_callback(
+                f"   [SUCCESS] Reused ID '{cached_id}' confirmed for this game in "
+                f"an earlier scan under '{label}'.\n"
+            )
+            verified_save_directories.append((cached_folder, 95))
+            continue
+
+        # No confident match and nothing cached for this game yet — surface
+        # every numeric ID folder (instead of silently guessing just one) so
+        # the user can pick the right one manually; newest first as a hint.
+        id_folders_by_recency = sorted(id_folders, key=os.path.getmtime, reverse=True)
+        log_callback(
+            f"   [?] Found {len(id_folders_by_recency)} unmatched numeric ID save "
+            f"folder(s) under '{label}' with no name to confirm against. "
+            f"Listing all, most recently modified first, for manual review:\n"
+        )
+        for rank, folder in enumerate(id_folders_by_recency):
+            log_callback(f"      -> {folder}\n")
+            verified_save_directories.append((folder, 36 if rank == 0 else 35))
+
+    if id_cache_dirty:
+        _save_id_cache(id_cache)
 
     # --- DEEP SCAN ---
     user_profile = os.environ.get("USERPROFILE", "")
-    localappdata = os.environ.get("LOCALAPPDATA", "")
     roots_to_scan = [
         os.path.join(user_profile, "Documents"),
         os.path.join(user_profile, "Documents", "My Games"),
-        localappdata,
+        os.environ.get("LOCALAPPDATA", ""),
         os.path.join(user_profile, "AppData", "LocalLow"),
-        appdata,
+        os.environ.get("APPDATA", ""),
         os.path.join(user_profile, "Saved Games"),
-        public_docs,
+        os.path.join(os.environ.get("PUBLIC", r"C:\\Users\\Public"), "Documents"),
     ]
-
-    # Add base emulator folders for keyword scanning, as a fallback
-    roots_to_scan.append(os.path.join(appdata, "Goldberg SteamEmu Saves"))
-    roots_to_scan.append(os.path.join(appdata, "Goldberg UplayEmu Saves"))
-    roots_to_scan.append(os.path.join(public_docs, "Steam"))
-
-    # Add Steam userdata folders if no app_id is known
-    if not app_id:
-        steam_userdata_folders = find_steam_userdata_folders(log_callback)
-        roots_to_scan.extend(steam_userdata_folders)
-
-    roots_to_scan = sorted(list(set(p for p in roots_to_scan if p and os.path.isdir(p))))
+    roots_to_scan = sorted(set(p for p in roots_to_scan if p and os.path.isdir(p)))
 
     candidate_paths = []
-    all_search_terms = list(set(high_priority_keywords + dev_keywords + pub_keywords))
     MAX_SEARCH_DEPTH = 4
 
     for root_dir in roots_to_scan:
@@ -376,8 +462,9 @@ def run_save_finder(game_directory, log_callback, success_callback):
                     if any(term in d.lower() for term in all_search_terms):
                         candidate_paths.append(os.path.join(dirpath, d))
         except PermissionError:
-            log_callback(f"   [SCAN] Permission denied during scan of '{root_dir}', results may be incomplete.\n")
-            pass
+            log_callback(
+                f"   [SCAN] Permission denied during scan of '{root_dir}', results may be incomplete.\n"
+            )
 
     candidate_paths = list(set(candidate_paths))
 
@@ -401,7 +488,14 @@ def run_save_finder(game_directory, log_callback, success_callback):
         if score >= 40:
             verified_save_directories.append((path, score))
 
-    verified_save_directories.sort(key=lambda x: x[1], reverse=True)
+    # --- CONSOLIDATE ---
+    # The same path can be discovered by more than one method above (e.g. an
+    # ID-keyed container match and a keyword match); keep the highest score
+    # seen for each unique path before filtering/sorting.
+    path_scores = {}
+    for path, score in verified_save_directories:
+        path_scores[path] = max(path_scores.get(path, 0), score)
+    consolidated_saves = sorted(path_scores.items(), key=lambda x: x[1], reverse=True)
 
     # --- SUBFOLDER FILTERING ---
     # Remove paths that are subdirectories of other, higher-scoring paths.
