@@ -348,6 +348,28 @@ def run_save_finder(game_directory, log_callback, success_callback):
 
     verified_save_directories = []
 
+    # --- NAMED EMULATOR FOLDERS ---
+    # New step: Check for emulators that use a name (e.g., "RUNE") instead of a numeric ID,
+    # often inside a generic container like `Public\Documents\Steam`.
+    log_callback("   [SCAN] Checking for named emulator save folders (RUNE, Tenoke, etc.)...\n")
+    named_emu_folders = ["rune", "tenoke", "flt"]
+    for container_path in _get_id_keyed_containers(log_callback):
+        if not os.path.isdir(container_path):
+            continue
+
+        for emu_name in named_emu_folders:
+            emu_path = os.path.join(container_path, emu_name)
+            if os.path.isdir(emu_path):
+                # If we find a folder with a known emu name, it's a very strong candidate.
+                # It might contain an AppID subfolder, or the saves directly.
+                if app_id and os.path.isdir(os.path.join(emu_path, str(app_id))):
+                    final_path = os.path.join(emu_path, str(app_id))
+                    log_callback(f"   [SCAN] Found high-confidence path: {final_path}\n")
+                    verified_save_directories.append((final_path, 100))
+                else:
+                    log_callback(f"   [SCAN] Found high-confidence path: {emu_path}\n")
+                    verified_save_directories.append((emu_path, 98))
+
     # --- ID-KEYED EMULATOR/LOADER SAVE CONTAINERS ---
     # Goldberg's Steam/Uplay forks, CODEX, and Steam itself all store saves
     # under <container>/<numeric id>/, so the folder name itself carries no
