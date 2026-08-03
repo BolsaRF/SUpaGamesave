@@ -9,6 +9,7 @@ import threading
 import queue
 import configparser
 import re
+import time
 import urllib.request
 import urllib.error
 import tempfile
@@ -23,6 +24,19 @@ try:
     from PIL import Image, ImageDraw  # type: ignore
 except Exception:
     pystray = None
+
+# Optional filesystem-watch dependency (pip install watchdog).
+# When available, auto-backup reacts to real file events instead of
+# re-walking + re-hashing every watched save folder on a 30s timer.
+try:
+    from watchdog.observers import Observer  # type: ignore
+    from watchdog.events import FileSystemEventHandler  # type: ignore
+except Exception:
+    Observer = None
+
+    class FileSystemEventHandler:  # type: ignore
+        """Stub so _SaveDirEventHandler can still be defined."""
+        pass
 
 import customtkinter as ctk
 import tkinter as tk
@@ -171,6 +185,28 @@ def _debug_mark(message: str):
         pass
 
 
+class _SaveDirEventHandler(FileSystemEventHandler):
+    """Marks the watched save root dirty whenever anything inside it
+    changes. The app debounces these marks and only hashes/uploads once
+    writes have settled — this handler must stay cheap because games can
+    fire hundreds of events per second while saving."""
+
+    def __init__(self, app: "SaveFinderApp", root_path: str):
+        super().__init__()
+        self._app = app
+        self._root_path = root_path
+
+    def on_any_event(self, event):
+        try:
+            # Ignore pure directory-modified noise (fires when a child is
+            # touched; the child's own event already marks us dirty).
+            if getattr(event, "is_directory", False) and event.event_type == "modified":
+                return
+            self._app._mark_path_dirty(self._root_path)
+        except Exception:
+            pass
+
+
 class SaveFinderApp(ctk.CTk):
 
     def __init__(self):
@@ -194,6 +230,8 @@ class SaveFinderApp(ctk.CTk):
 
         self._auto_backup_state: dict[str, dict[str, object]] = {}
         self._auto_backup_in_progress: set[str] = set()
+        # Fallback interval for the legacy walk-everything poll, used only
+        # when the watchdog package isn't installed.
         self._auto_backup_interval_ms = 30000
         # path -> profile name, for every profile's resolved save location —
         # rebuilt periodically so auto-backup watches all profiles, not just
@@ -201,6 +239,19 @@ class SaveFinderApp(ctk.CTk):
         self._auto_backup_targets: dict[str, str] = {}
         self._auto_backup_targets_refresh_ms = 180000
         self._auto_backup_enabled = load_setting(self._settings_path, APP_SETTINGS_AUTO_BACKUP, "0") == "1"
+
+        # --- watchdog (event-driven auto-backup) state ---
+        self._watch_observer = None                    # watchdog Observer thread
+        self._watched_paths: dict[str, object] = {}    # root path -> watch handle
+        self._dirty_paths: dict[str, float] = {}       # root path -> last event time
+        self._dirty_lock = threading.Lock()
+        # How long a folder must be quiet (no new events) before we hash
+        # and back it up — avoids zipping mid-save while the game is still
+        # writing files.
+        self._auto_backup_debounce_s = 10.0
+        # Cheap timer that only drains the dirty set; nothing is walked or
+        # hashed here unless an event actually arrived.
+        self._dirty_check_interval_ms = 2000
 
         # Window
         self.title("Universal Game Save Finder & Backup")
@@ -523,6 +574,11 @@ class SaveFinderApp(ctk.CTk):
         except Exception:
             pass
 
+        if Observer is None:
+            self._append_log_text(
+                "\n[WARN] 'watchdog' package not installed — auto-backup will fall back to 30s polling. Install with: pip install watchdog\n"
+            )
+
         self._append_log_text("\n[READY] App started. Backup/Restore enabled when Drive deps are installed.\n")
 
     # ---- settings persistence helpers ----
@@ -803,8 +859,16 @@ class SaveFinderApp(ctk.CTk):
                     self._stop_tray()
                 except Exception:
                     pass
+                try:
+                    self._stop_watches()
+                except Exception:
+                    pass
                 self.destroy()
         except Exception:
+            try:
+                self._stop_watches()
+            except Exception:
+                pass
             try:
                 self.destroy()
             except Exception:
@@ -886,6 +950,7 @@ class SaveFinderApp(ctk.CTk):
         # a fresh scan against the new backend runs, instead of waiting up
         # to _auto_backup_targets_refresh_ms for the next scheduled scan.
         self._auto_backup_targets = {}
+        self._sync_watches()  # drop watches on paths that no longer apply
         if self._auto_backup_enabled:
             self._spawn_auto_backup_targets_scan()
 
@@ -895,6 +960,10 @@ class SaveFinderApp(ctk.CTk):
         if self._auto_backup_enabled:
             self._reset_auto_backup_state()
             self._spawn_auto_backup_targets_scan()
+        else:
+            # Tear down all filesystem watches and pending change marks so
+            # nothing fires after the user turned auto-backup off.
+            self._stop_watches()
         try:
             self._update_tray_state()
         except Exception:
@@ -915,6 +984,12 @@ class SaveFinderApp(ctk.CTk):
 
         def _worker():
             self._auto_backup_targets = self.profiles_view.build_auto_backup_targets(log_callback=_log)
+            # (Re)attach filesystem watches for the fresh target set on the
+            # main thread — watch bookkeeping is not thread-safe here.
+            try:
+                self.after(0, self._sync_watches)
+            except Exception:
+                pass
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -955,7 +1030,85 @@ class SaveFinderApp(ctk.CTk):
         self._save_app_setting(APP_SETTINGS_TEMP_DIR, "")
         self._append_log_text("\n[INFO] Temp folder reset to system default.\n")
 
-    # -------- auto backup --------
+    # -------- auto backup (event-driven via watchdog) --------
+    def _watchdog_available(self) -> bool:
+        return Observer is not None
+
+    def _mark_path_dirty(self, path: str):
+        """Called from watchdog's observer thread on every file event.
+        Just records 'this save root changed at time X' — the actual
+        hashing/zipping happens later, once events stop arriving for
+        _auto_backup_debounce_s seconds."""
+        try:
+            with self._dirty_lock:
+                self._dirty_paths[path] = time.time()
+        except Exception:
+            pass
+
+    def _sync_watches(self):
+        """Make the set of active filesystem watches match
+        _auto_backup_targets. Safe to call repeatedly; runs on the main
+        thread (scheduled via self.after)."""
+        if not self._watchdog_available():
+            return
+        if not self._auto_backup_enabled:
+            self._stop_watches()
+            return
+
+        try:
+            if self._watch_observer is None or not self._watch_observer.is_alive():
+                self._watch_observer = Observer()
+                self._watch_observer.daemon = True
+                self._watch_observer.start()
+                self._watched_paths = {}
+        except Exception as e:
+            self._append_log_text(f"\n[ERROR] Could not start filesystem watcher: {e}\n")
+            self._watch_observer = None
+            return
+
+        desired = {p for p in self._auto_backup_targets.keys() if os.path.isdir(p)}
+
+        # Unschedule watches for paths no longer in the target set.
+        for path in list(self._watched_paths.keys()):
+            if path not in desired:
+                watch = self._watched_paths.pop(path, None)
+                try:
+                    if watch is not None:
+                        self._watch_observer.unschedule(watch)
+                except Exception:
+                    pass
+                with self._dirty_lock:
+                    self._dirty_paths.pop(path, None)
+
+        # Schedule watches for new paths.
+        for path in desired:
+            if path in self._watched_paths:
+                continue
+            try:
+                handler = _SaveDirEventHandler(self, path)
+                self._watched_paths[path] = self._watch_observer.schedule(handler, path, recursive=True)
+                self._queue_log("INFO", f"[AUTO-BACKUP] Watching for changes: {path}\n")
+            except Exception as e:
+                self._queue_log("WARN", f"[AUTO-BACKUP] Could not watch '{path}': {e}\n")
+
+    def _stop_watches(self):
+        try:
+            if self._watch_observer is not None:
+                try:
+                    self._watch_observer.unschedule_all()
+                except Exception:
+                    pass
+                try:
+                    self._watch_observer.stop()
+                except Exception:
+                    pass
+                self._watch_observer = None
+            self._watched_paths = {}
+            with self._dirty_lock:
+                self._dirty_paths.clear()
+        except Exception:
+            pass
+
     def _reset_auto_backup_state(self):
         # compute_directory_tree_hash reads every file in each discovered
         # path — do this in a background thread so toggling auto-backup on
@@ -986,62 +1139,145 @@ class SaveFinderApp(ctk.CTk):
         return latest
 
     def _auto_backup_poll(self):
+        """Periodic tick. With watchdog installed this is nearly free: it
+        only drains paths that a filesystem event marked dirty. Without
+        watchdog it falls back to the legacy walk-everything scan every
+        _auto_backup_interval_ms."""
         try:
-            if self._auto_backup_enabled and self._auto_backup_targets:
-                for path in list(self._auto_backup_targets.keys()):
-                    if path in self._auto_backup_in_progress:
-                        continue
-                    if not os.path.isdir(path):
-                        continue
-
-                    latest_mtime = self._get_directory_latest_mtime(path)
-                    previous = self._auto_backup_state.get(path)
-
-                    if previous is None:
-                        self._auto_backup_state[path] = {"latest_mtime": latest_mtime, "hash": None}
-                        continue
-
-                    if latest_mtime <= previous.get("latest_mtime", 0.0):
-                        continue
-
-                    current_hash = compute_directory_tree_hash(path)
-                    if current_hash == previous.get("hash"):
-                        self._auto_backup_state[path]["latest_mtime"] = latest_mtime
-                        continue
-
-                    self._auto_backup_state[path] = {"latest_mtime": latest_mtime, "hash": current_hash}
-                    self._auto_backup_in_progress.add(path)
-
-                    # Every watched path came from an existing profile
-                    # (built by build_auto_backup_targets), so its profile
-                    # name is already known — no guessing needed.
-                    profile_name = self._auto_backup_targets.get(path) or self._default_backup_profile_name(path)
-                    self._queue_log(
-                        "INFO",
-                        f"[AUTO-BACKUP] Change detected in '{path}' (profile: {profile_name}) — uploading...\n",
-                    )
-
-                    def log_worker(message: str):
-                        msg = (message or "").strip()
-                        upper = msg.upper()
-                        level = "INFO"
-                        if msg.startswith("[SUCCESS]") or "[SUCCESS]" in msg or "SUCCESS" in upper:
-                            level = "SUCCESS"
-                        elif msg.startswith("[FAILED]") or "FAILED" in upper or "ERROR" in upper or msg.startswith("[ERROR]"):
-                            level = "ERROR"
-                        elif "WARN" in upper:
-                            level = "WARN"
-                        self._queue_log(level, message)
-
-                    threading.Thread(
-                        target=self._auto_backup_worker,
-                        args=(path, profile_name, self._detected_save_root_name(path), log_worker),
-                        daemon=True,
-                    ).start()
+            if self._auto_backup_enabled:
+                if self._watchdog_available():
+                    self._process_dirty_paths()
+                else:
+                    self._legacy_auto_backup_scan()
         except Exception as e:
             self._append_log_text(f"\n[ERROR] Auto backup poll failed: {e}\n")
         finally:
-            self.after(self._auto_backup_interval_ms, self._auto_backup_poll)
+            interval = self._dirty_check_interval_ms if self._watchdog_available() else self._auto_backup_interval_ms
+            self.after(interval, self._auto_backup_poll)
+
+    def _process_dirty_paths(self):
+        now = time.time()
+        ready: list[str] = []
+        with self._dirty_lock:
+            for path, last_event in list(self._dirty_paths.items()):
+                # Keep waiting while events are still arriving — a game
+                # mid-save touches files continuously, and each event
+                # pushes last_event forward. We only act once quiet.
+                if now - last_event >= self._auto_backup_debounce_s:
+                    del self._dirty_paths[path]
+                    ready.append(path)
+
+        for path in ready:
+            if not os.path.isdir(path):
+                continue
+            if path in self._auto_backup_in_progress:
+                # A backup for this path is still running — re-arm so we
+                # re-check after it finishes rather than dropping the event.
+                with self._dirty_lock:
+                    self._dirty_paths.setdefault(path, now)
+                continue
+
+            self._auto_backup_in_progress.add(path)
+            threading.Thread(target=self._check_and_backup_path, args=(path,), daemon=True).start()
+
+    def _check_and_backup_path(self, path: str):
+        """Runs on a background thread: hash the changed folder, skip if
+        contents are actually identical (e.g. a file was rewritten with the
+        same bytes), otherwise upload."""
+        try:
+            current_hash = compute_directory_tree_hash(path)
+            previous = self._auto_backup_state.get(path)
+            if previous is not None and current_hash == previous.get("hash"):
+                self._auto_backup_state[path] = {"latest_mtime": time.time(), "hash": current_hash}
+                return
+            self._auto_backup_state[path] = {"latest_mtime": time.time(), "hash": current_hash}
+
+            # Every watched path came from an existing profile (built by
+            # build_auto_backup_targets), so its profile name is already
+            # known — no guessing needed.
+            profile_name = self._auto_backup_targets.get(path) or self._default_backup_profile_name(path)
+            self._queue_log(
+                "INFO",
+                f"[AUTO-BACKUP] Change detected in '{path}' (profile: {profile_name}) — uploading...\n",
+            )
+
+            def log_worker(message: str):
+                msg = (message or "").strip()
+                upper = msg.upper()
+                level = "INFO"
+                if msg.startswith("[SUCCESS]") or "[SUCCESS]" in msg or "SUCCESS" in upper:
+                    level = "SUCCESS"
+                elif msg.startswith("[FAILED]") or "FAILED" in upper or "ERROR" in upper or msg.startswith("[ERROR]"):
+                    level = "ERROR"
+                elif "WARN" in upper:
+                    level = "WARN"
+                self._queue_log(level, message)
+
+            self._backup_to_drive_worker(path, profile_name, self._detected_save_root_name(path), log_worker)
+        except Exception as e:
+            self._queue_log("ERROR", f"[AUTO-BACKUP] Failed for '{path}': {e}\n")
+        finally:
+            try:
+                self._auto_backup_in_progress.discard(path)
+            except Exception:
+                pass
+
+    def _legacy_auto_backup_scan(self):
+        """Old polling behavior, kept only as a fallback when the watchdog
+        package isn't installed. Walks every watched folder's mtimes each
+        tick, which is what caused the CPU/disk load."""
+        if not self._auto_backup_targets:
+            return
+        for path in list(self._auto_backup_targets.keys()):
+            if path in self._auto_backup_in_progress:
+                continue
+            if not os.path.isdir(path):
+                continue
+
+            latest_mtime = self._get_directory_latest_mtime(path)
+            previous = self._auto_backup_state.get(path)
+
+            if previous is None:
+                self._auto_backup_state[path] = {"latest_mtime": latest_mtime, "hash": None}
+                continue
+
+            if latest_mtime <= previous.get("latest_mtime", 0.0):
+                continue
+
+            current_hash = compute_directory_tree_hash(path)
+            if current_hash == previous.get("hash"):
+                self._auto_backup_state[path]["latest_mtime"] = latest_mtime
+                continue
+
+            self._auto_backup_state[path] = {"latest_mtime": latest_mtime, "hash": current_hash}
+            self._auto_backup_in_progress.add(path)
+
+            # Every watched path came from an existing profile
+            # (built by build_auto_backup_targets), so its profile
+            # name is already known — no guessing needed.
+            profile_name = self._auto_backup_targets.get(path) or self._default_backup_profile_name(path)
+            self._queue_log(
+                "INFO",
+                f"[AUTO-BACKUP] Change detected in '{path}' (profile: {profile_name}) — uploading...\n",
+            )
+
+            def log_worker(message: str):
+                msg = (message or "").strip()
+                upper = msg.upper()
+                level = "INFO"
+                if msg.startswith("[SUCCESS]") or "[SUCCESS]" in msg or "SUCCESS" in upper:
+                    level = "SUCCESS"
+                elif msg.startswith("[FAILED]") or "FAILED" in upper or "ERROR" in upper or msg.startswith("[ERROR]"):
+                    level = "ERROR"
+                elif "WARN" in upper:
+                    level = "WARN"
+                self._queue_log(level, message)
+
+            threading.Thread(
+                target=self._auto_backup_worker,
+                args=(path, profile_name, self._detected_save_root_name(path), log_worker),
+                daemon=True,
+            ).start()
 
     def _auto_backup_worker(self, root_path: str, profile_name: str, save_root: str, log_worker):
         try:
@@ -1208,6 +1444,12 @@ class SaveFinderApp(ctk.CTk):
                         threading.Thread(target=_ensure_profile_remote, daemon=True).start()
                 except Exception:
                     pass
+
+            # New save locations may have appeared — refresh the watch set
+            # so auto-backup starts reacting to them without waiting for
+            # the next scheduled targets rescan.
+            if self._auto_backup_enabled:
+                self._spawn_auto_backup_targets_scan()
 
             self.refresh_profiles_ui(prefer_local_results=True)
 
