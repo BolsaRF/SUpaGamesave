@@ -43,6 +43,25 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import simpledialog, messagebox
 
+try:
+    from customtkinter.windows.widgets.core_widget_classes import ctk_base_class
+except Exception:  # pragma: no cover
+    ctk_base_class = None
+
+if ctk_base_class is not None:
+    _ctk_update_dimensions_event = getattr(ctk_base_class.CTkBaseClass, "_update_dimensions_event", None)
+    if _ctk_update_dimensions_event is not None:
+        def _safe_ctk_update_dimensions_event(self, event=None):
+            try:
+                return _ctk_update_dimensions_event(self, event)
+            except RecursionError:
+                return None
+
+        try:
+            ctk_base_class.CTkBaseClass._update_dimensions_event = _safe_ctk_update_dimensions_event
+        except Exception:
+            pass
+
 # ---- Import extracted backends/utilities (new package) ----
 
 # Allow running this file directly (python save_finder/gui_app.py), and —
@@ -222,6 +241,10 @@ class SaveFinderApp(ctk.CTk):
 
         # Profiles UI state
         self._profiles_refreshing = False
+        self._suppress_background_refresh = False
+        self._profiles_refresh_pending = False
+        self._window_state_watcher_active = True
+        self._tray_restore_in_progress = False
         self.selected_profile_name: str | None = None
         self.profiles_panel_widgets = {}
         self._profile_rows = []
@@ -552,7 +575,7 @@ class SaveFinderApp(ctk.CTk):
 
         self.process_log_queue()
         self.selected_profile_name = self._load_selected_profile_name()
-        self.after(200, self.refresh_profiles_ui)
+        self.after(1000, self.refresh_profiles_ui)
         self.after(5000, self._auto_backup_poll)
         self.after(6000, self._refresh_auto_backup_targets_async)
         self.after(50, self._restore_panel_split)
@@ -567,6 +590,7 @@ class SaveFinderApp(ctk.CTk):
             self._last_window_state = None
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.bind("<Unmap>", self._handle_window_unmap)
 
         try:
             if getattr(self, "start_at_login_var", None) and bool(self.start_at_login_var.get()):
@@ -694,7 +718,20 @@ class SaveFinderApp(ctk.CTk):
 
         def on_open(icon, item):
             try:
-                self.after(0, lambda: (self.deiconify(), self.lift()))
+                def _restore_window():
+                    try:
+                        if self.state() == "withdrawn":
+                            self.deiconify()
+                        elif self.state() == "iconic":
+                            self.deiconify()
+                        self.lift()
+                        self.focus_force()
+                        self.attributes("-topmost", True)
+                        self.after(100, lambda: self.attributes("-topmost", False))
+                    except Exception:
+                        pass
+
+                self.after(0, _restore_window)
             except Exception:
                 pass
 
@@ -785,12 +822,16 @@ class SaveFinderApp(ctk.CTk):
             if self._tray_icon:
                 def _run_icon():
                     try:
-                        self._tray_icon.run()
+                        if hasattr(self._tray_icon, "run_detached"):
+                            self._tray_icon.run_detached()
+                        else:
+                            self._tray_icon.run()
                     except Exception:
                         pass
 
                 self._tray_thread = threading.Thread(target=_run_icon, daemon=True)
                 self._tray_thread.start()
+                self.after(250, self._update_tray_state)
         except Exception:
             pass
 
@@ -821,12 +862,32 @@ class SaveFinderApp(ctk.CTk):
                     pass
                 self._tray_icon = None
             self._tray_thread = None
+            self._suppress_background_refresh = False
+            self._window_state_watcher_active = True
         except Exception:
             pass
 
+    def iconify(self):
+        try:
+            self._suppress_background_refresh = True
+            super().iconify()
+            self.after(200, lambda: setattr(self, "_suppress_background_refresh", False))
+        except Exception:
+            try:
+                self.withdraw()
+            except Exception:
+                pass
+
     def _minimize_to_tray(self):
         try:
-            self.withdraw()
+            self._tray_restore_in_progress = False
+            self._window_state_watcher_active = False
+            self._suppress_background_refresh = True
+            try:
+                self.withdraw()
+                self.update_idletasks()
+            except Exception:
+                self.iconify()
             self._start_tray()
             self._append_log_text("\n[INFO] App minimized to tray.\n")
         except Exception as e:
@@ -874,13 +935,27 @@ class SaveFinderApp(ctk.CTk):
             except Exception:
                 pass
 
+    def _handle_window_unmap(self, event=None):
+        try:
+            if getattr(self, "_window_state_watcher_active", True):
+                return
+            if self.state() == "iconic":
+                self._suppress_background_refresh = True
+                try:
+                    self.withdraw()
+                except Exception:
+                    pass
+                self.after(200, lambda: setattr(self, "_suppress_background_refresh", False))
+        except Exception:
+            pass
+
     def _watch_window_state(self):
+        if not getattr(self, "_window_state_watcher_active", True):
+            return
         try:
             cur = self.state()
             if cur != getattr(self, "_last_window_state", None):
-                if cur == "iconic":
-                    self._minimize_to_tray()
-                elif cur in ("normal", "zoomed"):
+                if cur in ("normal", "zoomed"):
                     self._stop_tray()
                 self._last_window_state = cur
         except Exception:
@@ -1457,8 +1532,31 @@ class SaveFinderApp(ctk.CTk):
 
     # --- Profiles UI ---
 
-    def refresh_profiles_ui(self, prefer_local_results: bool = False):
-        self.profiles_view.refresh_profiles_ui(prefer_local_results=prefer_local_results)
+    def refresh_profiles_ui(self, prefer_local_results: bool = False, full_rescan: bool = True):
+        if getattr(self, "_suppress_background_refresh", False):
+            return
+        try:
+            if not self.winfo_exists():
+                return
+            if self.state() in ("withdrawn", "iconic"):
+                return
+        except Exception:
+            pass
+
+        if getattr(self, "_profiles_refresh_pending", False):
+            return
+        self._profiles_refresh_pending = True
+
+        def _do_refresh():
+            self._profiles_refresh_pending = False
+            try:
+                self.profiles_view.refresh_profiles_ui(prefer_local_results=prefer_local_results, full_rescan=full_rescan)
+            except RecursionError:
+                self._append_log_text("\n[WARN] Profile refresh skipped after a widget redraw recursion.\n")
+            except Exception as e:
+                self._append_log_text(f"\n[WARN] Profile refresh skipped: {e}\n")
+
+        self.after(400, _do_refresh)
 
 
     def start_backup(self, root_path: str):

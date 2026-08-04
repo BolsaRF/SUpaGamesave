@@ -1,4 +1,4 @@
-customtkinter
+customtkinter==5.2.2
 google-api-python-client
 google-auth
 google-auth-oauthlib

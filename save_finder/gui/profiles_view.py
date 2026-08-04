@@ -120,8 +120,18 @@ class ProfilesView:
 
     def refresh_profiles_ui(self, prefer_local_results: bool = False, full_rescan: bool = True):
         app = self.app
+        if getattr(app, "_suppress_background_refresh", False):
+            return
+        try:
+            if not app.winfo_exists():
+                return
+            if app.state() in ("withdrawn", "iconic"):
+                return
+        except Exception:
+            pass
         if app._profiles_refreshing:
             return
+
         if app.storage_backend == "drive" and not _drive_enabled():
             self._clear_profiles_widgets()
             app.profiles_list_scroll._scrollbar.configure(height=0) if hasattr(app.profiles_list_scroll, "_scrollbar") else None
