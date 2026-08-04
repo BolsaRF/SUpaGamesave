@@ -720,10 +720,14 @@ class SaveFinderApp(ctk.CTk):
             try:
                 def _restore_window():
                     try:
+                        self._window_state_watcher_active = True
+                        self._suppress_background_refresh = False
+                        self._stop_tray()
                         if self.state() == "withdrawn":
                             self.deiconify()
                         elif self.state() == "iconic":
                             self.deiconify()
+                        self.update_idletasks()
                         self.lift()
                         self.focus_force()
                         self.attributes("-topmost", True)
@@ -869,29 +873,34 @@ class SaveFinderApp(ctk.CTk):
 
     def iconify(self):
         try:
-            self._suppress_background_refresh = True
-            super().iconify()
-            self.after(200, lambda: setattr(self, "_suppress_background_refresh", False))
-        except Exception:
+            if getattr(self, "_tray_restore_in_progress", False):
+                return
+            self._tray_restore_in_progress = True
             try:
-                self.withdraw()
-            except Exception:
-                pass
+                self._minimize_to_tray()
+            finally:
+                self.after(0, lambda: setattr(self, "_tray_restore_in_progress", False))
+            return
+        except Exception:
+            pass
+        try:
+            super().iconify()
+        except Exception:
+            pass
 
     def _minimize_to_tray(self):
         try:
-            self._tray_restore_in_progress = False
+            self._tray_restore_in_progress = True
             self._window_state_watcher_active = False
             self._suppress_background_refresh = True
-            try:
-                self.withdraw()
-                self.update_idletasks()
-            except Exception:
-                self.iconify()
-            self._start_tray()
-            self._append_log_text("\n[INFO] App minimized to tray.\n")
+            self.withdraw()
+            self.update_idletasks()
+            self.after(150, self._start_tray)
+            self.after(150, lambda: self._append_log_text("\n[INFO] App minimized to tray.\n"))
         except Exception as e:
             self._append_log_text(f"\n[ERROR] Minimize to tray failed: {e}\n")
+        finally:
+            self.after(0, lambda: setattr(self, "_tray_restore_in_progress", False))
 
     def _restore_panel_split(self):
         try:
