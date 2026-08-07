@@ -29,7 +29,7 @@ from ..storage_local import (
     list_profile_backups as localfs_list_profile_backups,
     get_or_create_profile_folder as localfs_get_or_create_profile_folder,
 )
-from ..zip_manifest import GOOGLE_DRIVE_MANIFEST_NAME
+from ..zip_manifest import GOOGLE_DRIVE_MANIFEST_NAME, normalize_save_path_for_current_user
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..gui_app import SaveFinderApp
@@ -272,7 +272,7 @@ class ProfilesView:
         if service is not None and not is_local:
             fast_path = drive_get_app_property(service, backup_file_id, "original_save_path")
             if fast_path:
-                return fast_path
+                return normalize_save_path_for_current_user(str(fast_path))
 
         try:
             with tempfile.NamedTemporaryFile(suffix=".zip", delete=False, dir=self.app.temp_dir or None) as tmp:
@@ -288,7 +288,7 @@ class ProfilesView:
                     manifest = json.loads(manifest_bytes.decode("utf-8"))
                 original_path = manifest.get("original_save_path")
                 if original_path:
-                    return str(original_path)
+                    return normalize_save_path_for_current_user(str(original_path))
             finally:
                 try:
                     os.remove(tmp_path)

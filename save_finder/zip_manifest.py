@@ -11,6 +11,40 @@ def safe_makedirs(p: str):
     os.makedirs(p, exist_ok=True)
 
 
+def normalize_save_path_for_current_user(path: str) -> str:
+    """Map an original Windows user profile path to the current user's equivalent.
+
+    Example: C:\\Users\\fabio\\Saved Games -> C:\\Users\\Legion5\\Saved Games
+    """
+    if not path:
+        return path
+
+    path = os.path.abspath(os.path.expandvars(path))
+    if os.path.exists(path):
+        return path
+
+    drive, tail = os.path.splitdrive(path)
+    if not tail:
+        return path
+
+    parts = [p for p in tail.strip("\\/").split(os.sep) if p]
+    if len(parts) < 3 or parts[0].lower() != "users":
+        return path
+
+    current_home = os.path.abspath(os.path.expanduser("~"))
+    current_drive, current_tail = os.path.splitdrive(current_home)
+    current_parts = [p for p in current_tail.strip("\\/").split(os.sep) if p]
+    if len(current_parts) < 2 or current_parts[0].lower() != "users":
+        return path
+
+    remainder = parts[2:]
+    current_user = current_parts[1]
+    mapped_parts = ["Users", current_user] + remainder
+    mapped_drive = current_drive or drive
+    mapped_path = os.path.join(mapped_drive + os.sep if mapped_drive else "", *mapped_parts)
+    return os.path.normpath(mapped_path)
+
+
 def create_zip_with_manifest(zip_path: str, manifest: dict, folder_to_backup: str, log_callback=None):
     """ZIP option B: zip contains manifest.json + contents/* (folder contents only)."""
     if log_callback:
@@ -97,6 +131,7 @@ def restore_zip_to_target(zip_path: str, target_dir: str, log_callback=None, tem
         if not final_target:
             raise RuntimeError("Restore target directory not provided and manifest has no original_save_path.")
 
+        final_target = normalize_save_path_for_current_user(str(final_target))
         final_target = os.path.abspath(final_target)
         safe_makedirs(final_target)
 

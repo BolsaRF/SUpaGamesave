@@ -28,7 +28,7 @@ except Exception:
     build = None
 
 from .hashing import DRIVE_ZIP_NAME_DELIM, ZIP_SHA256_PREFIX_LEN
-from .zip_manifest import GOOGLE_DRIVE_MANIFEST_NAME, extract_zip_contents, copy_contents_into_target
+from .zip_manifest import GOOGLE_DRIVE_MANIFEST_NAME, extract_zip_contents, copy_contents_into_target, normalize_save_path_for_current_user
 
 GOOGLE_DRIVE_APP_FOLDER_NAME = "SaveFinderBackups"
 GOOGLE_DRIVE_ZIP_MIME = "application/zip"
@@ -395,7 +395,7 @@ def drive_restore_backup_zip(service, file_id: str, target_dir: str, log_callbac
 
         final_target = target_dir
         if not final_target and manifest.get("original_save_path"):
-            final_target = manifest.get("original_save_path")
+            final_target = normalize_save_path_for_current_user(str(manifest.get("original_save_path")))
         if not final_target:
             raise RuntimeError(
                 "Restore target directory not provided and manifest has no original_save_path."
