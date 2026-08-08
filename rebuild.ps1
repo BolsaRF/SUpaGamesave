@@ -8,5 +8,5 @@ if (Test-Path $venvActivate) {
 }
 
 Write-Host "Running PyInstaller (spec)..."
-pyinstaller --noconfirm --onedir SaveFinder.spec
+pyinstaller --noconfirm SaveFinder.spec
 Write-Host "Rebuild finished. See dist\SaveFinder\"

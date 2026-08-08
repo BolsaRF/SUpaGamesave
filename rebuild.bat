@@ -4,6 +4,6 @@ rem Usage: run from repo root. Requires the venv to exist (optional: activates i
 if exist .venv\Scripts\activate (
   call .venv\Scripts\activate
 )
-pyinstaller --noconfirm --onedir SaveFinder.spec
+pyinstaller --noconfirm SaveFinder.spec
 echo Rebuild finished. See dist\SaveFinder\
 pause

@@ -10,8 +10,10 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install pyinstaller
 
-rem Build (one-folder) so the exe sits next to its data files in dist\SaveFinder\
-pyinstaller --noconfirm --onedir --windowed --name SaveFinder --add-data "credentials.json;." --add-data "token.json;." "save_finder\gui_app.py"
+rem Build (one-folder) so the exe sits next to its data files in dist\SaveFinder\.
+rem The spec bundles credentials.json, token.json, and Google's static discovery
+rem documents (required for the Drive backend in the frozen build).
+pyinstaller --noconfirm SaveFinder.spec
 
 echo Build finished. See dist\SaveFinder\
 endlocal
